@@ -1,0 +1,31 @@
+{
+	"SublimeLinter":
+	{
+		"linters":
+		{
+			"rust":
+			{
+				"use-cargo": true
+			}
+		}
+	},
+	"folders":
+	[
+		{
+			"follow_symlinks": true,
+			"path": "."
+		},
+		{
+			"follow_symlinks": true,
+			"path": "..\\..\\sandbox\\win32-gui"
+		},
+		{
+			"follow_symlinks": true,
+			"path": "..\\rust-bindgen"
+		},
+		{
+			"follow_symlinks": true,
+			"path": "F:\\Programs\\MSYS2-64\\mingw32\\i686-w64-mingw32\\include"
+		}
+	]
+}
