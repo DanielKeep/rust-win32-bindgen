@@ -312,7 +312,7 @@ pub const CXCursor_LastPreprocessing: ::libc::c_uint = 503;
 pub const CXCursor_ModuleImportDecl: ::libc::c_uint = 600;
 pub const CXCursor_FirstExtraDecl: ::libc::c_uint = 600;
 pub const CXCursor_LastExtraDecl: ::libc::c_uint = 600;
-#[derive(Copy, Clone)] #[repr(C)]
+#[derive(Copy, Clone, Debug)] #[repr(C)]
 pub struct CXCursor {
     pub kind: Enum_CXCursorKind,
     pub xdata: ::libc::c_int,

@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::path::PathBuf;
 
 pub trait BoolUtil {
     fn as_either<T>(&self, if_true: T, if_false: T) -> T;
@@ -28,9 +29,7 @@ impl CheckedFrom<usize> for u32 {
 
 impl CheckedFrom<usize> for i32 {
     fn checked_from(v: usize) -> i32 {
-        if ! (::std::i32::MIN as usize <= v) {
-            panic!("underflow on conversion from usize {} to i32", v);
-        } else if ! (v <= ::std::i32::MAX as usize) {
+        if ! (v <= ::std::i32::MAX as usize) {
             panic!("overflow on conversion from usize {} to i32", v);
         } else {
             v as i32
@@ -45,6 +44,26 @@ pub trait CheckedInto<T> {
 impl<T, U> CheckedInto<U> for T where U: CheckedFrom<T> {
     fn checked_into(self) -> U {
         CheckedFrom::checked_from(self)
+    }
+}
+
+pub trait PathBufExt {
+    fn normalize_path_sep(&mut self);
+}
+
+impl PathBufExt for PathBuf {
+    fn normalize_path_sep(&mut self) {
+        let s = ::std::mem::replace(self, PathBuf::new())
+            .into_os_string()
+            .into_string().unwrap_or_else(|oss| oss.to_string_lossy().into_owned());
+        let mut bs = s.into_bytes();
+        for b in &mut bs {
+            if *b == '/' as u8 { *b = '\\' as u8 }
+        }
+
+        // Back we go!
+        let p = String::from_utf8(bs).unwrap().into();
+        *self = p;
     }
 }
 

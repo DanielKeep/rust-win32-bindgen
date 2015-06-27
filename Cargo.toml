@@ -7,5 +7,8 @@ build = "build.rs"
 links = "clang"
 
 [dependencies]
+env_logger = "0.3.1"
 libc = "0.1.8"
+log = "0.3.1"
 num = "0.1.25"
+regex = "0.1.38"
