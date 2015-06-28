@@ -1,5 +1,7 @@
 use std::ffi::CString;
-use std::path::PathBuf;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 pub trait BoolUtil {
     fn as_either<T>(&self, if_true: T, if_false: T) -> T;
@@ -95,4 +97,9 @@ impl<T, U> TryInto<U> for T where U: TryFrom<T> {
     fn try_into(self) -> Option<U> {
         TryFrom::try_from(self)
     }
+}
+
+pub fn read_lines<P: AsRef<Path>>(path: P) -> io::Lines<io::BufReader<fs::File>> {
+    use std::io::BufRead;
+    io::BufReader::new(fs::File::open(path).unwrap()).lines()
 }

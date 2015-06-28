@@ -150,6 +150,22 @@ impl TranslationUnit {
     }
 }
 
+ext_impl! { Rc<TranslationUnit> as RcTranslationUnitExt {
+    fn tokenize_all_to_vec[](&self) -> Vec<Token> {
+        unsafe {
+            let range = ll::clang_getNullRange();
+            let mut toks_ptr = ::std::ptr::null_mut();
+            let mut toks_len = 0;
+            ll::clang_tokenize(self.1, range, &mut toks_ptr, &mut toks_len);
+            let toks_slice = ::std::slice::from_raw_parts(toks_ptr, toks_len as usize);
+            let toks = toks_slice.iter().map(|tok| Token::from_ll(self.clone(), *tok)).collect();
+            drop(toks_slice);
+            ll::clang_disposeTokens(self.1, toks_ptr, toks_len);
+            toks
+        }
+    }
+}}
+
 impl Drop for TranslationUnit {
     fn drop(&mut self) {
         unsafe { ll::clang_disposeTranslationUnit(self.1) }
@@ -256,6 +272,12 @@ impl Cursor {
         v
     }
 
+    pub fn kind(&self) -> Option<CursorKind> {
+        unsafe {
+            ll::clang_getCursorKind(self.1).try_into()
+        }
+    }
+
     pub fn location(&self) -> SourceLocation {
         unsafe {
             SourceLocation::from_ll(self.0.clone(), ll::clang_getCursorLocation(self.1))
@@ -318,6 +340,182 @@ pub enum VisitTermination {
     Early,
 }
 
+c_enum! {
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub enum CursorKind: ll::Enum_CXCursorKind {
+        UnexposedDecl = 1,
+        StructDecl = 2,
+        UnionDecl = 3,
+        ClassDecl = 4,
+        EnumDecl = 5,
+        FieldDecl = 6,
+        EnumConstantDecl = 7,
+        FunctionDecl = 8,
+        VarDecl = 9,
+        ParmDecl = 10,
+        ObjCInterfaceDecl = 11,
+        ObjCCategoryDecl = 12,
+        ObjCProtocolDecl = 13,
+        ObjCPropertyDecl = 14,
+        ObjCIvarDecl = 15,
+        ObjCInstanceMethodDecl = 16,
+        ObjCClassMethodDecl = 17,
+        ObjCImplementationDecl = 18,
+        ObjCCategoryImplDecl = 19,
+        TypedefDecl = 20,
+        CXXMethod = 21,
+        Namespace = 22,
+        LinkageSpec = 23,
+        Constructor = 24,
+        Destructor = 25,
+        ConversionFunction = 26,
+        TemplateTypeParameter = 27,
+        NonTypeTemplateParameter = 28,
+        TemplateTemplateParameter = 29,
+        FunctionTemplate = 30,
+        ClassTemplate = 31,
+        ClassTemplatePartialSpecialization = 32,
+        NamespaceAlias = 33,
+        UsingDirective = 34,
+        UsingDeclaration = 35,
+        TypeAliasDecl = 36,
+        ObjCSynthesizeDecl = 37,
+        ObjCDynamicDecl = 38,
+        CXXAccessSpecifier = 39,
+        ObjCSuperClassRef = 40,
+        ObjCProtocolRef = 41,
+        ObjCClassRef = 42,
+        TypeRef = 43,
+        CXXBaseSpecifier = 44,
+        TemplateRef = 45,
+        NamespaceRef = 46,
+        MemberRef = 47,
+        LabelRef = 48,
+        OverloadedDeclRef = 49,
+        VariableRef = 50,
+        InvalidFile = 70,
+        NoDeclFound = 71,
+        NotImplemented = 72,
+        InvalidCode = 73,
+        UnexposedExpr = 100,
+        DeclRefExpr = 101,
+        MemberRefExpr = 102,
+        CallExpr = 103,
+        ObjCMessageExpr = 104,
+        BlockExpr = 105,
+        IntegerLiteral = 106,
+        FloatingLiteral = 107,
+        ImaginaryLiteral = 108,
+        StringLiteral = 109,
+        CharacterLiteral = 110,
+        ParenExpr = 111,
+        UnaryOperator = 112,
+        ArraySubscriptExpr = 113,
+        BinaryOperator = 114,
+        CompoundAssignOperator = 115,
+        ConditionalOperator = 116,
+        CStyleCastExpr = 117,
+        CompoundLiteralExpr = 118,
+        InitListExpr = 119,
+        AddrLabelExpr = 120,
+        StmtExpr = 121,
+        GenericSelectionExpr = 122,
+        GNUNullExpr = 123,
+        CXXStaticCastExpr = 124,
+        CXXDynamicCastExpr = 125,
+        CXXReinterpretCastExpr = 126,
+        CXXConstCastExpr = 127,
+        CXXFunctionalCastExpr = 128,
+        CXXTypeidExpr = 129,
+        CXXBoolLiteralExpr = 130,
+        CXXNullPtrLiteralExpr = 131,
+        CXXThisExpr = 132,
+        CXXThrowExpr = 133,
+        CXXNewExpr = 134,
+        CXXDeleteExpr = 135,
+        UnaryExpr = 136,
+        ObjCStringLiteral = 137,
+        ObjCEncodeExpr = 138,
+        ObjCSelectorExpr = 139,
+        ObjCProtocolExpr = 140,
+        ObjCBridgedCastExpr = 141,
+        PackExpansionExpr = 142,
+        SizeOfPackExpr = 143,
+        LambdaExpr = 144,
+        ObjCBoolLiteralExpr = 145,
+        ObjCSelfExpr = 146,
+        UnexposedStmt = 200,
+        LabelStmt = 201,
+        CompoundStmt = 202,
+        CaseStmt = 203,
+        DefaultStmt = 204,
+        IfStmt = 205,
+        SwitchStmt = 206,
+        WhileStmt = 207,
+        DoStmt = 208,
+        ForStmt = 209,
+        GotoStmt = 210,
+        IndirectGotoStmt = 211,
+        ContinueStmt = 212,
+        BreakStmt = 213,
+        ReturnStmt = 214,
+        // GCCAsmStmt = 215,
+        AsmStmt = 215,
+        ObjCAtTryStmt = 216,
+        ObjCAtCatchStmt = 217,
+        ObjCAtFinallyStmt = 218,
+        ObjCAtThrowStmt = 219,
+        ObjCAtSynchronizedStmt = 220,
+        ObjCAutoreleasePoolStmt = 221,
+        ObjCForCollectionStmt = 222,
+        CXXCatchStmt = 223,
+        CXXTryStmt = 224,
+        CXXForRangeStmt = 225,
+        SEHTryStmt = 226,
+        SEHExceptStmt = 227,
+        SEHFinallyStmt = 228,
+        MSAsmStmt = 229,
+        NullStmt = 230,
+        DeclStmt = 231,
+        OMPParallelDirective = 232,
+        TranslationUnit = 300,
+        UnexposedAttr = 400,
+        IBActionAttr = 401,
+        IBOutletAttr = 402,
+        IBOutletCollectionAttr = 403,
+        CXXFinalAttr = 404,
+        CXXOverrideAttr = 405,
+        AnnotateAttr = 406,
+        AsmLabelAttr = 407,
+        PackedAttr = 408,
+        PreprocessingDirective = 500,
+        MacroDefinition = 501,
+        // MacroExpansion = 502,
+        MacroInstantiation = 502,
+        InclusionDirective = 503,
+        ModuleImportDecl = 600,
+    }
+}
+
+impl CursorKind {
+    #[allow(non_upper_case_globals)] pub const FirstDecl: CursorKind = /* 1 */ CursorKind::UnexposedDecl;
+    #[allow(non_upper_case_globals)] pub const LastDecl: CursorKind = /* 39 */ CursorKind::CXXAccessSpecifier;
+    #[allow(non_upper_case_globals)] pub const FirstRef: CursorKind = /* 40 */ CursorKind::ObjCSuperClassRef;
+    #[allow(non_upper_case_globals)] pub const LastRef: CursorKind = /* 50 */ CursorKind::VariableRef;
+    #[allow(non_upper_case_globals)] pub const FirstInvalid: CursorKind = /* 70 */ CursorKind::InvalidFile;
+    #[allow(non_upper_case_globals)] pub const LastInvalid: CursorKind = /* 73 */ CursorKind::InvalidCode;
+    #[allow(non_upper_case_globals)] pub const FirstExpr: CursorKind = /* 100 */ CursorKind::UnexposedExpr;
+    #[allow(non_upper_case_globals)] pub const LastExpr: CursorKind = /* 146 */ CursorKind::ObjCSelfExpr;
+    #[allow(non_upper_case_globals)] pub const FirstStmt: CursorKind = /* 200 */ CursorKind::UnexposedStmt;
+    #[allow(non_upper_case_globals)] pub const LastStmt: CursorKind = /* 232 */ CursorKind::OMPParallelDirective;
+    #[allow(non_upper_case_globals)] pub const FirstAttr: CursorKind = /* 400 */ CursorKind::UnexposedAttr;
+    #[allow(non_upper_case_globals)] pub const LastAttr: CursorKind = /* 408 */ CursorKind::PackedAttr;
+    #[allow(non_upper_case_globals)] pub const FirstPreprocessing: CursorKind = /* 500 */ CursorKind::PreprocessingDirective;
+    #[allow(non_upper_case_globals)] pub const LastPreprocessing: CursorKind = /* 503 */ CursorKind::InclusionDirective;
+    #[allow(non_upper_case_globals)] pub const FirstExtraDecl: CursorKind = /* 600 */ CursorKind::ModuleImportDecl;
+    #[allow(non_upper_case_globals)] pub const LastExtraDecl: CursorKind = /* 600 */ CursorKind::ModuleImportDecl;
+}
+
 pub struct SourceLocation(Rc<TranslationUnit>, ll::CXSourceLocation);
 
 impl SourceLocation {
@@ -338,13 +536,25 @@ impl SourceLocation {
     }
 
     // fn clang_getExpansionLocation(location: CXSourceLocation, file: *mut CXFile, line: *mut ::libc::c_uint, column: *mut ::libc::c_uint, offset: *mut ::libc::c_uint);
-    
+
     // fn clang_getPresumedLocation(location: CXSourceLocation, filename: *mut CXString, line: *mut ::libc::c_uint, column: *mut ::libc::c_uint);
-    
+
     // fn clang_getInstantiationLocation(location: CXSourceLocation, file: *mut CXFile, line: *mut ::libc::c_uint, column: *mut ::libc::c_uint, offset: *mut ::libc::c_uint);
-    
+
+    pub fn instantiation_location(&self) -> (Option<File>, u32, u32, u32) {
+        unsafe {
+            let mut file = ::std::ptr::null_mut();
+            let mut line = 0;
+            let mut column = 0;
+            let mut offset = 0;
+            ll::clang_getInstantiationLocation(self.1, &mut file, &mut line, &mut column, &mut offset);
+            let file = if file.is_null() { None } else { Some(File::from_ll(self.0.clone(), file)) };
+            (file, line, column, offset)
+        }
+    }
+
     // fn clang_getSpellingLocation(location: CXSourceLocation, file: *mut CXFile, line: *mut ::libc::c_uint, column: *mut ::libc::c_uint, offset: *mut ::libc::c_uint);
-    
+
     // fn clang_getFileLocation(location: CXSourceLocation, file: *mut CXFile, line: *mut ::libc::c_uint, column: *mut ::libc::c_uint, offset: *mut ::libc::c_uint);
 
     pub fn file_location(&self) -> (Option<File>, u32, u32, u32) {
@@ -357,6 +567,14 @@ impl SourceLocation {
             let file = if file.is_null() { None } else { Some(File::from_ll(self.0.clone(), file)) };
             (file, line, column, offset)
         }
+    }
+
+    pub fn display_short(&self) -> SourceLocationShortDisplay {
+        SourceLocationShortDisplay(self)
+    }
+
+    pub fn line(&self) -> u32 {
+        self.instantiation_location().1
     }
 }
 
@@ -372,9 +590,26 @@ impl PartialEq for SourceLocation {
 
 impl_Display! {
     for SourceLocation, (s,f) {
-        let (file, l, c, _) = s.file_location();
+        let (file, l, c, _) = s.instantiation_location();
         match file {
             Some(file) => write!(f, "{}:{}:{}", file, l, c),
+            None => write!(f, "(unknown):{}:{}", l, c)
+        }
+    }
+}
+
+pub struct SourceLocationShortDisplay<'a>(&'a SourceLocation);
+
+impl_Display! {
+    <['a]> for SourceLocationShortDisplay<'a>, (s, f) {
+        use std::path::PathBuf;
+        let (file, l, c, _) = s.0.instantiation_location();
+        match file {
+            Some(file) => {
+                let path = PathBuf::from(file.file_name());
+                let path = path.file_name().unwrap();
+                write!(f, "{}:{}:{}", path.to_str().unwrap(), l, c)
+            },
             None => write!(f, "(unknown):{}:{}", l, c)
         }
     }
@@ -387,7 +622,7 @@ impl File {
         File(tu, file)
     }
 
-    fn file_name(&self) -> String {
+    pub fn file_name(&self) -> String {
         use ::std::path::PathBuf;
         use ::util::PathBufExt;
         let s = unsafe {
@@ -406,4 +641,30 @@ pub unsafe fn cxstring_to_string(cxs: ll::CXString) -> String {
     let str = CStr::from_ptr(ll::clang_getCString(cxs)).to_string_lossy().into_owned();
     ll::clang_disposeString(cxs);
     str
+}
+
+pub struct Token(Rc<TranslationUnit>, ll::CXToken);
+
+impl Token {
+    fn from_ll(tu: Rc<TranslationUnit>, tok: ll::CXToken) -> Token {
+        Token(tu, tok)
+    }
+
+    // pub fn clang_getTokenSpelling(arg1: CXTranslationUnit, arg2: CXToken) -> CXString;
+
+    pub fn spelling(&self) -> String {
+        unsafe {
+            cxstring_to_string(ll::clang_getTokenSpelling((*self.0).1, self.1))
+        }
+    }
+    
+    // pub fn clang_getTokenLocation(arg1: CXTranslationUnit, arg2: CXToken) -> CXSourceLocation;
+    
+    // pub fn clang_getTokenExtent(arg1: CXTranslationUnit, arg2: CXToken) -> CXSourceRange;
+
+    pub fn location(&self) -> SourceLocation {
+        unsafe {
+            SourceLocation::from_ll(self.0.clone(), ll::clang_getTokenLocation((*self.0).1, self.1))
+        }
+    }
 }
