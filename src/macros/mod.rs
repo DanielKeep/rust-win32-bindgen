@@ -54,12 +54,6 @@ macro_rules! ext_impl {
     };
 }
 
-macro_rules! feat {
-    ($p:ident, $v:expr, $a:ident) => {
-        ::features::Features::from((::features::Partitions::$p, $v, ::features::Architectures::$a))
-    };
-}
-
 macro_rules! impl_Display {
     (for $t:ty, ($self_:ident, $fmt:ident) $body:block) => {
         impl ::std::fmt::Display for $t {

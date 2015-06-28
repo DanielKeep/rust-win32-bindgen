@@ -79,8 +79,9 @@ fn gen_winver_enum<W>(out: &mut W, json_str: &str) where W: io::Write {
     assert_eq!(primary.len(), reverse.len());
 
     // Make the map of non-primary aliases.
-    let aliases: HashMap<&str, u32> = root.iter().filter(|&(k, _)| k.starts_with("*"))
+    let mut aliases: Vec<(&str, u32)> = root.iter().filter(|&(k, _)| k.starts_with("*"))
         .map(|(k, v)| (&k[1..], *v)).collect();
+    aliases.sort();
 
     // Get a sorted list of versions.
     let mut vers: Vec<u32> = primary.values().cloned().collect();
@@ -88,11 +89,11 @@ fn gen_winver_enum<W>(out: &mut W, json_str: &str) where W: io::Write {
 
     // Use that to get a "next" version map.
     let next_ver_iter = vers.iter().cloned().skip(1).chain(Some(vers.last().unwrap() + 1).into_iter());
-    let _next_ver: HashMap<u32, u32> = vers.iter().cloned().zip(next_ver_iter).collect();
+    let next_ver: HashMap<u32, u32> = vers.iter().cloned().zip(next_ver_iter).collect();
 
     // Generate the enum.
     write!(out, r#"
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[repr(u32)]
 pub enum WinVersion {{
 {primary_variants}
@@ -100,14 +101,56 @@ pub enum WinVersion {{
 
 impl WinVersion {{
 {alias_consts}
+
+    pub const AFTER_LAST: u32 = 0x{guard_const:08x};
+
+    pub fn from_name(name: &str) -> Option<WinVersion> {{
+        match name {{
+{from_names}
+            _ => None
+        }}
+    }}
+
+    pub fn next_version(self) -> Option<WinVersion> {{
+        match self {{
+{next_versions}
+            _ => None
+        }}
+    }}
+
+    pub fn from_u32_round_up(v: u32) -> Option<WinVersion> {{
+{from_u32_round_ups}
+        None
+    }}
 }}
 "#,
         // primary_variants = primary.iter().map(|(k, v)| format!("    {} = 0x{:08x},", k, v)).join("\n"),
         primary_variants = vers.iter().cloned()
             .map(|v| format!("    {:<8} = 0x{:08x},", reverse[&v], v))
             .join("\n"),
+
         alias_consts = aliases.iter()
-            .map(|(k, v)| format!("    pub const {:<7}: WinVersion = WinVersion::{};", k, reverse[v]))
+            .map(|&(k, v)| format!("    pub const {:<7}: WinVersion = WinVersion::{};", k, reverse[&v]))
+            .join("\n"),
+
+        guard_const = next_ver[vers.last().unwrap()],
+
+        from_names = primary.iter().map(|(&k, &v)| (k, v)).chain(aliases.iter().map(|&(k, v)| (k, v)))
+            .map(|(k, v)| format!("            \"{}\" => Some(WinVersion::{}),",
+                k, reverse[&v]))
+            .join("\n"),
+
+        next_versions = vers.iter().cloned()
+            .filter(|&k| reverse.contains_key(&next_ver[&k]))
+            .map(|k| format!("            WinVersion::{:<8} => Some(WinVersion::{}),",
+                reverse[&k],
+                reverse[&next_ver[&k]]))
+            .join("\n"),
+
+        from_u32_round_ups = vers.iter().cloned()
+            .filter(|&k| reverse.contains_key(&next_ver[&k]))
+            .map(|k| format!("            if v <= 0x{:08x} {{ return Some(WinVersion::{}); }}",
+                k, reverse[&k]))
             .join("\n"),
     ).unwrap();
 }

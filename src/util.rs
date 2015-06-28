@@ -69,6 +69,34 @@ impl PathBufExt for PathBuf {
     }
 }
 
+pub trait ResultOptionExt<T, E> {
+    fn ro_or_else<F>(self, f: F) -> Result<Option<T>, E>
+    where F: FnOnce() -> Result<Option<T>, E>;
+
+    fn ro_and_then<T1, F>(self, f: F) -> Result<Option<T1>, E>
+    where F: FnOnce(T) -> Result<Option<T1>, E>;
+}
+
+impl<T, E> ResultOptionExt<T, E> for Result<Option<T>, E> {
+    fn ro_or_else<F>(self, f: F) -> Result<Option<T>, E>
+    where F: FnOnce() -> Result<Option<T>, E> {
+        match self {
+            Ok(Some(v)) => Ok(Some(v)),
+            Ok(None) => f(),
+            Err(err) => Err(err)
+        }
+    }
+
+    fn ro_and_then<T1, F>(self, f: F) -> Result<Option<T1>, E>
+    where F: FnOnce(T) -> Result<Option<T1>, E> {
+        match self {
+            Ok(Some(v)) => f(v),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err)
+        }
+    }
+}
+
 pub trait ToCStr {
     fn to_c_str(&self) -> CString;
 }
