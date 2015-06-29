@@ -39,7 +39,7 @@ struct Cache<'a> {
 }
 
 impl<'a> Cache<'a> {
-    fn new(index: Rc<Index>, gen_config: &'a GenConfig<'a>) -> Self {
+    fn new(index: Rc<Index>, gen_config: &'a GenConfig) -> Self {
         Cache {
             tu: TuCache::new(index, gen_config),
             features: HashMap::new(),
@@ -56,7 +56,7 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     let mut output = Output::new();
     let mut cache = Cache::new(index, gen_config);
 
-    for exp_config in gen_config.exp_configs {
+    for exp_config in &gen_config.exp_configs {
         info!("expanding with config {:?}", exp_config);
         info!(".. switches: {:?}", exp_config.switches());
         let root_tu = cache.tu.parse_translation_unit(path, exp_config).unwrap();
@@ -492,16 +492,16 @@ impl ExpConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct GenConfig<'a> {
-    pub exp_configs: &'a [ExpConfig],
-    pub switches: &'a [&'a str],
+pub struct GenConfig {
+    pub exp_configs: Vec<ExpConfig>,
+    pub switches: Vec<String>,
     pub ignore_decl_spellings: Vec<Regex>,
     pub ignore_file_paths: Vec<Regex>,
 }
 
-impl<'a> GenConfig<'a> {
-    fn switches(&self) -> &[&str] {
-        self.switches
+impl GenConfig {
+    fn switches(&self) -> &[String] {
+        &self.switches
     }
 
     fn should_ignore(&self, cursor: &Cursor) -> bool {
@@ -580,11 +580,11 @@ pub enum NativeCallConv {
 pub struct TuCache<'a> {
     index: Rc<Index>,
     cache: HashMap<TuCacheKey, Rc<TranslationUnit>>,
-    gen_config: &'a GenConfig<'a>,
+    gen_config: &'a GenConfig,
 }
 
 impl<'a> TuCache<'a> {
-    pub fn new(index: Rc<Index>, gen_config: &'a GenConfig<'a>) -> TuCache<'a> {
+    pub fn new(index: Rc<Index>, gen_config: &'a GenConfig) -> TuCache<'a> {
         TuCache {
             index: index,
             cache: HashMap::new(),
@@ -610,7 +610,7 @@ impl<'a> TuCache<'a> {
             return Ok(rc_tu.clone())
         }
 
-        let switches: Vec<String> = self.gen_config.switches().iter().map(|&s| s.into())
+        let switches: Vec<String> = self.gen_config.switches().iter().map(|s| s.clone())
             .chain(exp_config.switches().into_iter())
             .collect();
 
