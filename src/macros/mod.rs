@@ -12,7 +12,7 @@ macro_rules! c_enum {
             $(,)*
         }
     ) => {
-        #[$($attrs)*]
+        $(#[$attrs])*
         pub enum $name {
             $($var_name = $var_value),+
         }

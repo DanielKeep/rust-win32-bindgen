@@ -206,6 +206,12 @@ macro_rules! bitflags {
                 *self == $BitFlags::all()
             }
 
+            /// Returns `true` if any flags are currently set.
+            #[inline]
+            pub fn is_any(&self) -> bool {
+                !self.is_empty()
+            }
+
             /// Returns `true` if there are flags common to both `self` and `other`.
             #[inline]
             pub fn intersects(&self, other: $BitFlags) -> bool {

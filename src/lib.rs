@@ -25,7 +25,7 @@ use regex::Regex;
 use clang::{
     Index, RcIndexExt,
     TranslationUnit, RcTranslationUnitExt, TranslationUnitFlags,
-    Cursor,
+    Cursor, CursorKind,
 };
 
 use features::{
@@ -70,10 +70,10 @@ fn process_decl(decl_cur: Cursor, cache: &mut Cache, _arch: Architecture) {
     use clang::CursorKind as CK;
 
     let decl_kind = match decl_cur.kind() {
-        Some(CK::InclusionDirective)
-        | Some(CK::MacroInstantiation)
-        | None => return,
-        Some(kind) => kind
+        CK::InclusionDirective
+        | CK::MacroInstantiation
+        => return,
+        kind => kind
     };
 
     let decl_loc = decl_cur.location();
@@ -88,6 +88,137 @@ fn process_decl(decl_cur: Cursor, cache: &mut Cache, _arch: Architecture) {
         .unwrap_or_else(|| Features::default());
 
     debug!("process_decl feat: {:?}", feat);
+
+    match decl_kind {
+        CK::InclusionDirective
+        | CK::MacroInstantiation
+        => unreachable!(),
+
+        CK::FunctionDecl => process_function_decl(decl_cur, feat),
+
+        kind => warn!("could-not-translate unsupported {:?} {} at {}", kind, decl_cur.spelling(), decl_loc.display_short())
+    }
+}
+
+fn process_function_decl(decl_cur: Cursor, feat: Features) {
+    use clang::CallingConv as CC;
+
+    debug!("process_function_decl({}, _)", decl_cur);
+
+    // Is this an inline function?
+    let children = decl_cur.children();
+    if children.len() > 0 && children.last().unwrap().kind() == CursorKind::CompoundStmt {
+        // Err... *might be*
+        warn!("could-not-translate inline-fn {}", decl_cur);
+        return;
+    }
+
+    let ty = decl_cur.type_();
+
+    let cconv = match ty.calling_conv() {
+        CC::C => "C",
+        CC::X86StdCall => "stdcall",
+        cconv => {
+            warn!("could-not-translate unknown-cconv {} {:?}", decl_cur, cconv);
+            return;
+        }
+    };
+
+    match (|| -> Result<(), String> {
+        let res_ty = if ty.result().kind() == clang::TypeKind::Void {
+            String::new()
+        } else {
+            format!(" -> {}", try!(trans_type(ty.result())))
+        };
+        let arg_tys: Vec<String> = try!(ty.args().into_iter().map(trans_type).collect());
+        let arg_tys = arg_tys.connect(", ");
+        println!(
+            r#"/* {loc:<20} */ {extern_:<16} {{ {feat:<50}pub fn {name}({arg_tys}){res_ty}; }}"#,
+            loc = decl_cur.location().display_short().to_string(),
+            extern_ = format!("extern \"{}\"", cconv),
+            feat = feat.to_string(),
+            name = decl_cur.spelling(),
+            arg_tys = arg_tys,
+            res_ty = res_ty
+        );
+        Ok(())
+    })() {
+        Ok(()) => (),
+        Err(err) => warn!("could-not-translate misc {} {}", decl_cur, err)
+    }
+}
+
+fn trans_type(ty: clang::Type) -> Result<String, String> {
+    use clang::TypeKind as TK;
+    match ty.kind() {
+        TK::Invalid => Err("invalid type".into()),
+
+        // Basic types.
+        TK::Void => Ok("libc::c_void".into()),
+        TK::Char_U | TK::UChar => Ok("libc::c_uchar".into()),
+        TK::Char16 => Ok("u16".into()),
+        // **Note**: *not* `char` because C++ doesn't appear to guarantee that a value of type char32_t is a valid UTF-32 code unit.
+        TK::Char32 => Ok("u32".into()),
+        TK::UShort => Ok("libc::c_ushort".into()),
+        TK::UInt => Ok("libc::c_uint".into()),
+        TK::ULong => Ok("libc::c_ulong".into()),
+        TK::ULongLong => Ok("libc::c_ulonglong".into()),
+        TK::Char_S => Ok("libc::c_schar".into()),
+        TK::SChar => Ok("libc::c_schar".into()),
+        TK::WChar => Ok("libc::wchar_t".into()),
+        TK::Short => Ok("libc::c_short".into()),
+        TK::Int => Ok("libc::c_int".into()),
+        TK::Long => Ok("libc::c_long".into()),
+        TK::LongLong => Ok("libc::c_longlong".into()),
+        TK::Float => Ok("libc::c_float".into()),
+        TK::Double => Ok("libc::c_double".into()),
+        TK::NullPtr => Ok("*mut libc::c_void".into()),
+
+        // Constructed types.
+        TK::Pointer => {
+            Ok(format!("*{} {}",
+                if ty.is_const_qualified() { "const" } else { "mut" },
+                try!(trans_type(ty.pointee()))))
+        },
+
+        TK::Typedef => {
+            let ty_cur = ty.declaration();
+            let ty_file = ty_cur.location().file();
+            match ty_file.map(|f| f.name()) {
+                Some(name) => Ok(format!("::{}::{}", name, ty.spelling())),
+                // None => Ok(ty.spelling())
+                None => Ok(ty_cur.spelling())
+            }
+        },
+
+        TK::Unexposed
+        | TK::Bool
+        | TK::UInt128
+        | TK::Int128
+        | TK::LongDouble
+        | TK::Overload
+        | TK::Dependent
+        | TK::ObjCId
+        | TK::ObjCClass
+        | TK::ObjCSel
+        | TK::Complex
+        | TK::BlockPointer
+        | TK::LValueReference
+        | TK::RValueReference
+        | TK::Record
+        | TK::Enum
+        | TK::ObjCInterface
+        | TK::ObjCObjectPointer
+        | TK::FunctionNoProto
+        | TK::FunctionProto
+        | TK::ConstantArray
+        | TK::Vector
+        | TK::IncompleteArray
+        | TK::VariableArray
+        | TK::DependentSizedArray
+        | TK::MemberPointer
+        => Err(format!("unsupported type {:?}", ty.kind()))
+    }
 }
 
 fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features {
@@ -102,8 +233,11 @@ fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features 
         get_features(get_token_lines(file, tu_cache))
     );
 
-    fmap.range(Bound::Included(&line), Bound::Unbounded).next()
-        .map(|(_, v)| v.clone())
+    fmap.range(Bound::Unbounded, Bound::Included(&line)).next_back()
+        .map(|(i, v)| {
+            debug!(".. found: {}: {:?}", i, v);
+            v.clone()
+        })
         .unwrap_or_else(|| Features::default())
 }
 
@@ -212,7 +346,9 @@ fn get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {
             };
             // debug!(".. do_insert: {:?}", do_insert);
             if do_insert {
-                map.insert(line_num, stack.last().expect("non-empty stack").clone());
+                let feat = stack.last().expect("non-empty stack").clone();
+                debug!(" .. insert {}: {:?}", line_num, feat);
+                map.insert(line_num, feat);
             }
         }
     }

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::{Rc, Weak};
 use std::sync::RwLock;
 use libc;
@@ -275,9 +276,9 @@ impl Cursor {
         v
     }
 
-    pub fn kind(&self) -> Option<CursorKind> {
+    pub fn kind(&self) -> CursorKind {
         unsafe {
-            ll::clang_getCursorKind(self.1).try_into()
+            ll::clang_getCursorKind(self.1).try_into().expect("valid kind for cursor")
         }
     }
 
@@ -290,6 +291,12 @@ impl Cursor {
     pub fn spelling(&self) -> String {
         unsafe {
             cxstring_to_string(ll::clang_getCursorSpelling(self.1))
+        }
+    }
+
+    pub fn type_(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getCursorType(self.1))
         }
     }
 
@@ -320,6 +327,12 @@ impl Cursor {
             0 => VisitTermination::Normal,
             _ => VisitTermination::Early
         }
+    }
+}
+
+impl fmt::Display for Cursor {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(fmt, "{}: {:?} {}", self.location().display_short(), self.kind(), self.spelling())
     }
 }
 
@@ -639,6 +652,13 @@ impl File {
         p.normalize_path_sep();
         p.to_string_lossy().into_owned()
     }
+
+    pub fn name(&self) -> String {
+        use ::std::path::PathBuf;
+        let path = PathBuf::from(self.file_name());
+        path.file_stem().expect("valid file stem for File::name")
+            .to_string_lossy().into_owned()
+    }
 }
 
 impl_Display! { for File, (s, f) { write!(f, "{}", s.file_name()) } }
@@ -674,4 +694,146 @@ impl Token {
             SourceLocation::from_ll(self.0.clone(), ll::clang_getTokenLocation((*self.0).1, self.1))
         }
     }
+}
+
+pub struct Type(Rc<TranslationUnit>, ll::CXType);
+
+impl Type {
+    fn from_ll(tu: Rc<TranslationUnit>, type_: ll::CXType) -> Type {
+        Type(tu, type_)
+    }
+
+    pub fn args(&self) -> Vec<Type> {
+        unsafe {
+            let len = ll::clang_getNumArgTypes(self.1);
+            let mut args = Vec::with_capacity(len as usize);
+            for i in 0..(len as u32) {
+                args.push(Type::from_ll(self.0.clone(), ll::clang_getArgType(self.1, i)))
+            }
+            args
+        }
+    }
+
+    pub fn calling_conv(&self) -> CallingConv {
+        unsafe {
+            ll::clang_getFunctionTypeCallingConv(self.1).try_into().expect("valid calling conv for type")
+        }
+    }
+
+    pub fn declaration(&self) -> Cursor {
+        unsafe {
+            Cursor::from_ll(ll::clang_getTypeDeclaration(self.1)).expect("valid cursor for Type::declaration")
+        }
+    }
+
+    pub fn is_const_qualified(&self) -> bool {
+        unsafe {
+            ll::clang_isConstQualifiedType(self.1) != 0
+        }
+    }
+
+    pub fn kind(&self) -> TypeKind {
+        self.1.kind.try_into().expect("valid type kind for type")
+    }
+
+    pub fn pointee(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getPointeeType(self.1))
+        }
+    }
+
+    // pub fn clang_isFunctionTypeVariadic(T: CXType) -> ::libc::c_uint;
+
+    pub fn result(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getResultType(self.1))
+        }
+    }
+
+    pub fn spelling(&self) -> String {
+        unsafe {
+            cxstring_to_string(ll::clang_getTypeSpelling(self.1))
+        }
+    }
+}
+
+c_enum! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub enum CallingConv: ll::Enum_CXCallingConv {
+        Default = 0,
+        C = 1,
+        X86StdCall = 2,
+        X86FastCall = 3,
+        X86ThisCall = 4,
+        X86Pascal = 5,
+        AAPCS = 6,
+        AAPCS_VFP = 7,
+        PnaclCall = 8,
+        IntelOclBicc = 9,
+        X86_64Win64 = 10,
+        X86_64SysV = 11,
+        Invalid = 100,
+        Unexposed = 200,
+    }
+}
+
+c_enum! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    pub enum TypeKind: ll::Enum_CXTypeKind {
+        Invalid = 0,
+        Unexposed = 1,
+        Void = 2,
+        Bool = 3,
+        Char_U = 4,
+        UChar = 5,
+        Char16 = 6,
+        Char32 = 7,
+        UShort = 8,
+        UInt = 9,
+        ULong = 10,
+        ULongLong = 11,
+        UInt128 = 12,
+        Char_S = 13,
+        SChar = 14,
+        WChar = 15,
+        Short = 16,
+        Int = 17,
+        Long = 18,
+        LongLong = 19,
+        Int128 = 20,
+        Float = 21,
+        Double = 22,
+        LongDouble = 23,
+        NullPtr = 24,
+        Overload = 25,
+        Dependent = 26,
+        ObjCId = 27,
+        ObjCClass = 28,
+        ObjCSel = 29,
+        Complex = 100,
+        Pointer = 101,
+        BlockPointer = 102,
+        LValueReference = 103,
+        RValueReference = 104,
+        Record = 105,
+        Enum = 106,
+        Typedef = 107,
+        ObjCInterface = 108,
+        ObjCObjectPointer = 109,
+        FunctionNoProto = 110,
+        FunctionProto = 111,
+        ConstantArray = 112,
+        Vector = 113,
+        IncompleteArray = 114,
+        VariableArray = 115,
+        DependentSizedArray = 116,
+        MemberPointer = 117,
+    }
+}
+
+impl TypeKind {
+    #[allow(non_upper_case_globals)] pub const FirstBuiltin: TypeKind = /* 2 */ TypeKind::Void;
+    #[allow(non_upper_case_globals)] pub const LastBuiltin: TypeKind = /* 29 */ TypeKind::ObjCSel;
 }

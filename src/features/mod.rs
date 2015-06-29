@@ -1,5 +1,6 @@
 pub mod cc;
 
+use std::fmt;
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use itertools::Itertools;
 use clang;
@@ -74,6 +75,15 @@ impl Default for Features {
     }
 }
 
+impl fmt::Display for Features {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        if let Some(ref parts) = self.parts { try!(write!(fmt, "{}", parts)); }
+        if let Some(ref winver) = self.winver { try!(write!(fmt, "{}", winver)); }
+        if let Some(ref arch) = self.arch { try!(write!(fmt, "{}", arch)); }
+        Ok(())
+    }
+}
+
 impl From<Partitions> for Features {
     fn from(v: Partitions) -> Features {
         Features {
@@ -116,6 +126,25 @@ impl Partitions {
             "WINAPI_PARTITION_APP" => Some(Partitions::App),
             _ => None
         }
+    }
+}
+
+pub const CFG_FEATURE_PARTITION_DESKTOP: &'static str = "winapi_partition_desktop";
+pub const CFG_FEATURE_PARTITION_APP: &'static str = "winapi_partition_app";
+
+impl fmt::Display for Partitions {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        assert!(self.is_any(), "can't have no partitions enabled");
+        if !self.is_all() {
+            if (*self & Partitions::Desktop).is_any() {
+                try!(write!(fmt, "#[cfg(feature={:?})] ", CFG_FEATURE_PARTITION_DESKTOP));
+            } else if (*self & Partitions::App).is_any() {
+                try!(write!(fmt, "#[cfg(feature={:?})] ", CFG_FEATURE_PARTITION_APP));
+            } else {
+                unreachable!()
+            }
+        }
+        Ok(())
     }
 }
 
@@ -285,6 +314,34 @@ impl WinVersions {
     }
 }
 
+pub const CFG_FEATURE_VERSION_PREFIX: &'static str = "winapi_ver_";
+
+impl fmt::Display for WinVersions {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        assert!(&*self.0 != &[0..0], "can't have no versions enabled");
+        const PREFIX: &'static str = CFG_FEATURE_VERSION_PREFIX;
+        const END: u32 = !0;
+
+        // Skip if there are no restrictions.
+        if &*self.0 == &[0..!0] { return Ok(()); }
+
+        // Here we go!
+        try!(write!(fmt, "#[cfg(any("));
+        for (i, Range { start: a, end: b }) in self.0.iter().cloned().enumerate() {
+            try!(write!(fmt, "{}", if i == 0 { "" } else { ", " }));
+            match (a, b) {
+                (0, b) => try!(write!(fmt, "not(feature=\"{}{:08x}\")", PREFIX, b)),
+                (a, END) => try!(write!(fmt, "feature=\"{}{:08x}\"", PREFIX, a)),
+                (a, b) => try!(write!(fmt,
+                    "all(feature=\"{0}{1:08x}\", not(feature=\"{0}{2:08x}\"))",
+                    PREFIX, a, b))
+            }
+        }
+        try!(write!(fmt, "))] "));
+        Ok(())
+    }
+}
+
 impl From<WinVersion> for WinVersions {
     fn from(v: WinVersion) -> WinVersions {
         match v.next_version() {
@@ -367,6 +424,24 @@ impl Architectures {
 
             _ => None
         }
+    }
+}
+
+impl fmt::Display for Architectures {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        assert!(self.is_any(), "can't have no architectures enabled");
+        if !self.is_all() {
+            if (*self & Architectures::X86_32).is_any() {
+                try!(write!(fmt, "#[cfg(target_arch = \"x86\")] "));
+            } else if (*self & Architectures::X86_64).is_any() {
+                try!(write!(fmt, "#[cfg(target_arch = \"x86_64\")] "));
+            } else if (*self & Architectures::Arm).is_any() {
+                try!(write!(fmt, "#[cfg(target_arch = \"arm\")] "));
+            } else {
+                unreachable!()
+            }
+        }
+        Ok(())
     }
 }
 
