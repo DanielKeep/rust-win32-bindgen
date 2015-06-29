@@ -15,13 +15,24 @@ pub struct Features {
 }
 
 impl Features {
+    pub fn check_valid(&self) {
+        if let Some(ref parts) = self.parts {
+            assert!(parts.is_any(), "cannot have empty partition set");
+        }
+        if let Some(ref winver) = self.winver {
+            assert!(winver.is_any(), "cannot have empty winver set");
+        }
+        if let Some(ref arch) = self.arch {
+            assert!(arch.is_any(), "cannot have empty architecture set");
+        }
+    }
+
     pub fn complement(self) -> Features {
-        debug!("Features::complement({:?})", self);
-        { let r = Features {
+        Features {
             parts: { debug!(".. parts..."); self.parts.map(|p| !p) },
             winver: { debug!(".. winver..."); self.winver.map(WinVersions::complement) },
             arch: { debug!(".. arch..."); self.arch.map(|a| !a) },
-        }; debug!(".. done."); r }
+        }
     }
 
     pub fn and(self, other: Features) -> Features {
@@ -113,24 +124,29 @@ impl From<Architectures> for Features {
 
 bitflags! {
     flags Partitions: u8 {
-        const All     = 0b11,
-        const Desktop = 0b01,
-        const App     = 0b10,
+        const All           = 0b111,
+        const Desktop       = 0b001,
+        const App           = 0b010,
+        const DesktopApp    = 0b011,
+        const Phone         = 0b100,
     }
 }
 
 impl Partitions {
     pub fn from_define(s: &str) -> Option<Partitions> {
         match s {
-            "WINAPI_PARTITION_DESKTOP" => Some(Partitions::Desktop),
-            "WINAPI_PARTITION_APP" => Some(Partitions::App),
+            "WINAPI_PARTITION_DESKTOP"  => Some(Partitions::Desktop),
+            "WINAPI_PARTITION_APP"      => Some(Partitions::App),
+            "WINAPI_PARTITION_PC_APP"   => Some(Partitions::DesktopApp),
+            "WINAPI_PARTITION_PHONE"    => Some(Partitions::Phone),
             _ => None
         }
     }
 }
 
-pub const CFG_FEATURE_PARTITION_DESKTOP: &'static str = "winapi_partition_desktop";
-pub const CFG_FEATURE_PARTITION_APP: &'static str = "winapi_partition_app";
+pub const CFG_FEATURE_PARTITION_DESKTOP: &'static str = "winapi_desktop";
+pub const CFG_FEATURE_PARTITION_APP: &'static str = "winapi_app";
+pub const CFG_FEATURE_PARTITION_PHONE: &'static str = "winapi_phone";
 
 impl fmt::Display for Partitions {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -138,10 +154,12 @@ impl fmt::Display for Partitions {
         if !self.is_all() {
             if (*self & Partitions::Desktop).is_any() {
                 try!(write!(fmt, "#[cfg(feature={:?})] ", CFG_FEATURE_PARTITION_DESKTOP));
-            } else if (*self & Partitions::App).is_any() {
+            }
+            if (*self & Partitions::App).is_any() {
                 try!(write!(fmt, "#[cfg(feature={:?})] ", CFG_FEATURE_PARTITION_APP));
-            } else {
-                unreachable!()
+            }
+            if (*self & Partitions::Phone).is_any() {
+                try!(write!(fmt, "#[cfg(feature={:?})] ", CFG_FEATURE_PARTITION_PHONE));
             }
         }
         Ok(())
@@ -152,6 +170,10 @@ impl fmt::Display for Partitions {
 pub struct WinVersions(Vec<Range<u32>>);
 
 impl WinVersions {
+    fn is_any(&self) -> bool {
+        &*self.0 != [0..0]
+    }
+
     pub fn complement(self) -> WinVersions {
         debug!("WinVersions::complement({:?})", self);
         if &*self.0 == &[0..!0] {
@@ -391,13 +413,16 @@ bitflags! {
         const X86_64    = 0b010,
         const X86_All   = 0b011,
         const Arm       = 0b100,
+
+        const Bits64    = 0b010,
     }
 }
 
 impl Architectures {
     pub fn from_define(s: &str) -> Option<Architectures> {
         match s {
-            "__X86__"
+            "_X86_"
+            | "__X86__"
             | "__i386__"
             | "_M_IX86"
             => Some(Architectures::X86_32),
@@ -413,6 +438,9 @@ impl Architectures {
             | "_ARM_"
             | "_M_ARM"
             => Some(Architectures::Arm),
+
+            "WIN64" | "_WIN64" | "__WIN64" | "__WIN64__"
+            => Some(Architectures::Bits64),
 
             "_M_MRX000"
             | "_M_ALPHA"
@@ -431,15 +459,20 @@ impl fmt::Display for Architectures {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         assert!(self.is_any(), "can't have no architectures enabled");
         if !self.is_all() {
+            try!(write!(fmt, "#[cfg(any("));
+            let mut sep = "";
             if (*self & Architectures::X86_32).is_any() {
-                try!(write!(fmt, "#[cfg(target_arch = \"x86\")] "));
-            } else if (*self & Architectures::X86_64).is_any() {
-                try!(write!(fmt, "#[cfg(target_arch = \"x86_64\")] "));
-            } else if (*self & Architectures::Arm).is_any() {
-                try!(write!(fmt, "#[cfg(target_arch = \"arm\")] "));
-            } else {
-                unreachable!()
+                try!(write!(fmt, "{}target_arch=\"x86\"", sep));
+                sep = ", ";
             }
+            if (*self & Architectures::X86_64).is_any() {
+                try!(write!(fmt, "{}target_arch=\"x86_64\"", sep));
+                sep = ", ";
+            }
+            if (*self & Architectures::Arm).is_any() {
+                try!(write!(fmt, "{}target_arch=\"arm\"", sep));
+            }
+            try!(write!(fmt, "))] "));
         }
         Ok(())
     }
@@ -452,7 +485,8 @@ pub fn has_important_defines(toks: &[String]) -> bool {
 pub fn is_important_define(tok: &str) -> bool {
     match tok {
         // Architecture defines
-        "__X86__"
+        "_X86_"
+        | "__X86__"
         | "__i386__"
         | "_M_IX86"
         | "_AMD64_"
@@ -473,11 +507,16 @@ pub fn is_important_define(tok: &str) -> bool {
         | "_M_IA64"
 
         // Important winapi defines
+        | "WIN64" | "_WIN64" | "__WIN64" | "__WIN64__"
         | "WINVER"
         | "_WIN32_WINNT"
         | "NTDDI_VERSION"
         | "WINAPI_FAMILY_PARTITION"
         | "WINAPI_FAMILY_ONE_PARTITION"
+        | "WINAPI_PARTITION_DESKTOP"
+        | "WINAPI_PARTITION_APP"
+        | "WINAPI_PARTITION_PC_APP"
+        | "WINAPI_PARTITION_PHONE_APP"
 
         => true,
         _ => false

@@ -714,6 +714,18 @@ impl Type {
         }
     }
 
+    pub fn array_element_type(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getArrayElementType(self.1))
+        }
+    }
+
+    pub fn array_size(&self) -> u64 {
+        unsafe {
+            ll::clang_getArraySize(self.1) as u64 // TODO: checked
+        }
+    }
+
     pub fn calling_conv(&self) -> CallingConv {
         unsafe {
             ll::clang_getFunctionTypeCallingConv(self.1).try_into().expect("valid calling conv for type")

@@ -15,6 +15,7 @@ pub enum Node {
     Ne(Box<Node>, Box<Node>),
     Lt(Box<Node>, Box<Node>),
     Le(Box<Node>, Box<Node>),
+    Gt(Box<Node>, Box<Node>),
     Ge(Box<Node>, Box<Node>),
     OsVer(Box<Node>),
     SpVer(Box<Node>),
@@ -37,10 +38,11 @@ impl Node {
             Ne(ref l, ref r) => Ok(try!(try!(l.eval()).ne(try!(r.eval())))),
             Lt(ref l, ref r) => Ok(try!(try!(l.eval()).lt(try!(r.eval())))),
             Le(ref l, ref r) => Ok(try!(try!(l.eval()).le(try!(r.eval())))),
+            Gt(ref l, ref r) => Ok(try!(try!(l.eval()).gt(try!(r.eval())))),
             Ge(ref l, ref r) => Ok(try!(try!(l.eval()).ge(try!(r.eval())))),
             OsVer(ref n) => try!(n.eval()).os_ver(),
             SpVer(ref n) => try!(n.eval()).sp_ver(),
-            Part(ref n) => Node::eval_partition(&*try!(n.simplify_to_ident())),
+            Part(ref n) => Node::eval_partition(try!(n.eval())),
             Invoke(ref n, ref a) => {
                 try!(try!(n.eval()).ignore());
                 try!(try!(a.eval()).ignore());
@@ -74,6 +76,13 @@ impl Node {
             };
         }
 
+        if ident.starts_with("WINAPI_PARTITION_") {
+            return match Partitions::from_define(ident) {
+                Some(parts) => Ok(Value::Part(parts)),
+                None => Err(format!("unknown WINAPI_PARTITION symbol {:?}", ident))
+            };
+        }
+
         if is_important_define(ident) {
             return Err(format!("cannot eval important ident {:?}", ident))
         }
@@ -92,6 +101,10 @@ impl Node {
             | "_WIN32_WINNT"
             | "WINVER"
             => return Ok(Value::Ignore),
+
+            "_CONTRACT_GEN"
+            => return Ok(Value::Bool(false)),
+
             _ => ()
         }
 
@@ -106,12 +119,12 @@ impl Node {
         Ok(Value::Ignore)
     }
 
-    fn eval_partition(ident: &str) -> Result<Value, String> {
-        if let Some(part) = Partitions::from_define(ident) {
-            return Ok(Value::Feat(part.into()));
+    fn eval_partition(value: Value) -> Result<Value, String> {
+        use self::Value::*;
+        match value {
+            Part(parts) => Ok(Feat(parts.into())),
+            v => Err(format!("cannot eval as a partition: {:?}", v))
         }
-
-        Err(format!("cannot eval partition {:?}", ident))
     }
 
     fn simplify_to_ident(&self) -> Result<String, String> {
@@ -125,8 +138,10 @@ impl Node {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
+    Bool(bool),
     Int(u32),
     Feat(Features),
+    Part(Partitions),
     FullVersionValue(u32),
     ShortVersionValue(u32),
     FullVersion,
@@ -140,6 +155,7 @@ impl Value {
     pub fn to_features(self) -> Result<Features, String> {
         use self::Value::*;
         match self {
+            Bool(_) => Ok(Features::default()),
             Feat(f) => Ok(f),
             FullVersionValue(v) => {
                 let wv = WinVersion::from_u32_round_up(v).expect("valid full version");
@@ -160,6 +176,7 @@ impl Value {
         use self::Value::*;
         match self {
             Ignore => Ok(Ignore),
+            Bool(b) => Ok(Bool(!b)),
             Feat(f) => Ok(Feat(f.complement())),
             n => Err(format!("invalid op: ! {:?}", n))
         }
@@ -169,7 +186,10 @@ impl Value {
         use self::Value::*;
         match (self, rhs) {
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Bool(b)) | (Bool(b), Ignore) => Ok(Bool(b)),
             (Ignore, Feat(f)) | (Feat(f), Ignore) => Ok(Feat(f)),
+            (Bool(true), Feat(f)) | (Feat(f), Bool(true)) => Ok(Feat(f)),
+            (Bool(false), Feat(_)) | (Feat(_), Bool(false)) => Ok(Ignore),
             (Feat(l), Feat(r)) => Ok(Feat(l.and(r))),
             (l, r) => Err(format!("invalid op: {:?} && {:?}", l, r))
         }
@@ -188,8 +208,17 @@ impl Value {
     fn eq(self, rhs: Value) -> Result<Value, String> {
         use self::Value::*;
         match (self, rhs) {
+            (FullVersion, FullVersionValue(i)) => {
+                let start = WinVersion::from_u32_round_up(i).expect("valid version for fs == fvv");
+                let end = WinVersion::from_u32_round_up((i & 0xFFFF_0000) + 1);
+                let wv = match end {
+                    Some(end) => WinVersions::from(start..end),
+                    None => WinVersions::from(start..)
+                };
+                Ok(Feat(wv.into()))
+            },
             (OsVersion, FullVersionValue(i)) => {
-                let start = WinVersion::from_u32_round_up(i).expect("valid version for ==");
+                let start = WinVersion::from_u32_round_up(i).expect("valid version for os == fvv");
                 let end = WinVersion::from_u32_round_up((i & 0xFFFF_0000) + 0x1_0000);
                 let wv = match end {
                     Some(end) => WinVersions::from(start..end),
@@ -198,6 +227,7 @@ impl Value {
                 Ok(Feat(wv.into()))
             },
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} == {:?}", l, r))
         }
     }
@@ -224,6 +254,7 @@ impl Value {
                 Ok(Feat(wv.into()))
             },
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} != {:?}", l, r))
         }
     }
@@ -240,6 +271,7 @@ impl Value {
                 Ok(Feat(WinVersions::from(..end).into()))
             },
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} < {:?}", l, r))
         }
     }
@@ -256,7 +288,25 @@ impl Value {
                 Ok(Feat(WinVersions::from(..end).into()))
             },
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} <= {:?}", l, r))
+        }
+    }
+
+    fn gt(self, rhs: Value) -> Result<Value, String> {
+        use self::Value::*;
+        match (self, rhs) {
+            (FullVersion, FullVersionValue(i)) | (FullVersion, Int(i)) => {
+                let start = WinVersion::from_u32_round_up(i + 1).expect("valid full version for >");
+                Ok(Feat(WinVersions::from(start..).into()))
+            },
+            (ShortVersion, ShortVersionValue(i)) | (ShortVersion, Int(i)) => {
+                let start = WinVersion::from_u32_round_up((i << 16) + 1).expect("valid full version for >");
+                Ok(Feat(WinVersions::from(start..).into()))
+            },
+            (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
+            (l, r) => Err(format!("invalid op: {:?} > {:?}", l, r))
         }
     }
 
@@ -272,6 +322,7 @@ impl Value {
                 Ok(Feat(WinVersions::from(start..).into()))
             },
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} >= {:?}", l, r))
         }
     }
@@ -413,6 +464,10 @@ fn parse_relational_expr<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
             .ro_and_then(|toks| parse_relational_expr(toks))
             .ro_and_then(|(rhs, tail)| Ok(Some((Node::Le(Box::new(lhs.clone()), Box::new(rhs)), tail))))
         )
+        .ro_or_else(|| parse_munch(toks, ">")
+            .ro_and_then(|toks| parse_relational_expr(toks))
+            .ro_and_then(|(rhs, tail)| Ok(Some((Node::Gt(Box::new(lhs.clone()), Box::new(rhs)), tail))))
+        )
         .ro_or_else(|| parse_munch(toks, ">=")
             .ro_and_then(|toks| parse_relational_expr(toks))
             .ro_and_then(|(rhs, tail)| Ok(Some((Node::Ge(Box::new(lhs.clone()), Box::new(rhs)), tail))))
@@ -487,13 +542,21 @@ fn parse_primary_expr<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
 }
 
 lazy_static! {
-    static ref RE_INT_HEX_LITERAL: Regex = Regex::new(r#"0[Xx]([0-9A-Fa-f]+)"#).unwrap();
-    static ref RE_IDENT_LITERAL: Regex = Regex::new(r#"([A-Za-z_][A-Za-z0-9_]*)"#).unwrap();
+    static ref RE_INT_DEC_LITERAL: Regex = Regex::new(r#"^([0-9]+)$"#).unwrap();
+    static ref RE_INT_HEX_LITERAL: Regex = Regex::new(r#"^0[Xx]([0-9A-Fa-f]+)$"#).unwrap();
+    static ref RE_IDENT_LITERAL: Regex = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
 }
 
 fn parse_literal<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
     debug!("parse_literal({:?})", toks);
     parse_guard!(toks);
+
+    if let Some(cap) = RE_INT_DEC_LITERAL.captures(toks[0].as_ref()) {
+        return Ok(Some((
+            Node::IntLit(u32::from_str_radix(cap.at(1).unwrap(), 10).ok().expect("valid int literal")),
+            &toks[1..]
+        )));
+    }
 
     if let Some(cap) = RE_INT_HEX_LITERAL.captures(toks[0].as_ref()) {
         return Ok(Some((

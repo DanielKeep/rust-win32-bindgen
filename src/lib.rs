@@ -33,40 +33,72 @@ use features::{
     define_feature, define_feature_expr,
 };
 
-struct Cache<'config> {
-    tu: TuCache<'config>,
+struct Cache<'a> {
+    tu: TuCache<'a>,
     features: HashMap<String, BTreeMap<u32, Features>>,
 }
 
-impl<'config> Cache<'config> {
-    fn new(index: Rc<Index>, config: &'config Config) -> Self {
+impl<'a> Cache<'a> {
+    fn new(index: Rc<Index>, gen_config: &'a GenConfig<'a>) -> Self {
         Cache {
-            tu: TuCache::new(index, config),
+            tu: TuCache::new(index, gen_config),
             features: HashMap::new(),
         }
     }
 }
 
-pub fn process_header(path: &str, config: &Config) {
-    let _output = Output::new();
-
+pub fn process_header(path: &str, gen_config: &GenConfig) {
     let index = Index::create(
         /*exclude_declarations_from_pch*/ false,
         /*display_diagnostics*/ false,
     );
 
-    let mut cache = Cache::new(index, &config);
-    let root_tu = cache.tu.parse_translation_unit(
-        path,
-        Architecture::X86_32
-    ).unwrap();
+    let mut output = Output::new();
+    let mut cache = Cache::new(index, gen_config);
 
-    for decl_cur in root_tu.cursor().children().into_iter().filter(|cur| !config.should_ignore(cur)) {
-        process_decl(decl_cur, &mut cache, Architecture::X86_32);
+    for exp_config in gen_config.exp_configs {
+        info!("expanding with config {:?}", exp_config);
+        info!(".. switches: {:?}", exp_config.switches());
+        let root_tu = cache.tu.parse_translation_unit(path, exp_config).unwrap();
+        let feat_mask = exp_config.arch.to_features();
+
+        for decl_cur in root_tu.cursor().children().into_iter() {
+            if gen_config.should_ignore(&decl_cur) {
+                debug!("ignoring: {}", decl_cur);
+            } else {
+                process_decl(decl_cur, feat_mask.clone(), exp_config.native_cc, &mut output, &mut cache);
+            }
+        }
+    }
+
+    info!("generating output...");
+    {
+        let fn_decls = output.fn_decls;
+        let mut names: Vec<_> = fn_decls.keys().collect();
+        names.sort();
+
+        for (name, &ref decls) in names.into_iter().map(|k| (k, &fn_decls[k])) {
+            let mut decl_set = vec![];
+            for &(ref feat, ref cc, ref decl, ref annot) in decls {
+                debug!(".. {} ({}): {:?}", name, annot, feat);
+                decl_set.push(format!("{extern_:<15} {{ {decl} }} /* {annot} */",
+                    extern_ = format!("extern {:?}", cc.as_str()),
+                    annot = annot,
+                    decl = decl.replace(
+                        "{feat}",
+                        &format!("{:<33}", feat.to_string())
+                    )
+                ));
+            }
+            decl_set.sort();
+            for decl in decl_set {
+                println!("{}", decl);
+            }
+        }
     }
 }
 
-fn process_decl(decl_cur: Cursor, cache: &mut Cache, _arch: Architecture) {
+fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv, output: &mut Output, cache: &mut Cache) {
     use clang::CursorKind as CK;
 
     let decl_kind = match decl_cur.kind() {
@@ -89,19 +121,24 @@ fn process_decl(decl_cur: Cursor, cache: &mut Cache, _arch: Architecture) {
 
     debug!("process_decl feat: {:?}", feat);
 
+    // This is kind of a pain, but as it turns out, different architectures can cause some things to behave in weird ways.  For example, `DWORD` might be a typedef on one arch, but a macro on another, which leads to a different expansion.  Hooray!
+    let feat = feat.and(feat_mask);
+    feat.check_valid();
+
     match decl_kind {
         CK::InclusionDirective
         | CK::MacroInstantiation
         => unreachable!(),
 
-        CK::FunctionDecl => process_function_decl(decl_cur, feat),
+        CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
 
         kind => warn!("could-not-translate unsupported {:?} {} at {}", kind, decl_cur.spelling(), decl_loc.display_short())
     }
 }
 
-fn process_function_decl(decl_cur: Cursor, feat: Features) {
+fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, native_cc: NativeCallConv) {
     use clang::CallingConv as CC;
+    use self::NativeCallConv as NCC;
 
     debug!("process_function_decl({}, _)", decl_cur);
 
@@ -115,16 +152,18 @@ fn process_function_decl(decl_cur: Cursor, feat: Features) {
 
     let ty = decl_cur.type_();
 
-    let cconv = match ty.calling_conv() {
-        CC::C => "C",
-        CC::X86StdCall => "stdcall",
-        cconv => {
-            warn!("could-not-translate unknown-cconv {} {:?}", decl_cur, cconv);
+    let cconv = match (ty.calling_conv(), native_cc) {
+        (CC::C, NCC::C) => AbsCallConv::System,
+        (CC::C, _) => AbsCallConv::ExplicitlyC,
+        (CC::X86StdCall, NCC::Stdcall) => AbsCallConv::System,
+        (cconv, _) => {
+            warn!("could-not-translate bad-cconv {} {:?}", decl_cur, cconv);
             return;
         }
     };
 
     match (|| -> Result<(), String> {
+        let name = decl_cur.spelling();
         let res_ty = if ty.result().kind() == clang::TypeKind::Void {
             String::new()
         } else {
@@ -132,15 +171,14 @@ fn process_function_decl(decl_cur: Cursor, feat: Features) {
         };
         let arg_tys: Vec<String> = try!(ty.args().into_iter().map(trans_type).collect());
         let arg_tys = arg_tys.connect(", ");
-        println!(
-            r#"/* {loc:<20} */ {extern_:<16} {{ {feat:<50}pub fn {name}({arg_tys}){res_ty}; }}"#,
-            loc = decl_cur.location().display_short().to_string(),
-            extern_ = format!("extern \"{}\"", cconv),
-            feat = feat.to_string(),
-            name = decl_cur.spelling(),
+        let decl = format!(
+            r#"{{feat}}pub fn {name}({arg_tys}){res_ty};"#,
+            name = name,
             arg_tys = arg_tys,
-            res_ty = res_ty
+            res_ty = res_ty,
         );
+        let annot = decl_cur.location().display_short().to_string();
+        output.add_func_decl(name, feat, cconv, decl, annot);
         Ok(())
     })() {
         Ok(()) => (),
@@ -150,6 +188,16 @@ fn process_function_decl(decl_cur: Cursor, feat: Features) {
 
 fn trans_type(ty: clang::Type) -> Result<String, String> {
     use clang::TypeKind as TK;
+    debug!("trans_type({:?} {:?})", ty.kind(), ty.spelling());
+
+    fn mod_qual(cur: &Cursor) -> String {
+        let file = cur.location().file();
+        match file.map(|f| f.name()) {
+            Some(name) => format!("::{}::", name),
+            None => String::new()
+        }
+    }
+
     match ty.kind() {
         TK::Invalid => Err("invalid type".into()),
 
@@ -176,22 +224,32 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
 
         // Constructed types.
         TK::Pointer => {
+            // We want to know whether the thing we're pointing to is const or not.
+            let pointee_ty = ty.pointee();
             Ok(format!("*{} {}",
-                if ty.is_const_qualified() { "const" } else { "mut" },
-                try!(trans_type(ty.pointee()))))
+                if pointee_ty.is_const_qualified() { "const" } else { "mut" },
+                try!(trans_type(pointee_ty))))
         },
 
-        TK::Typedef => {
-            let ty_cur = ty.declaration();
-            let ty_file = ty_cur.location().file();
-            match ty_file.map(|f| f.name()) {
-                Some(name) => Ok(format!("::{}::{}", name, ty.spelling())),
-                // None => Ok(ty.spelling())
-                None => Ok(ty_cur.spelling())
-            }
+        TK::Record
+        | TK::Enum
+        | TK::Typedef
+        => {
+            // **Note**: use the decl to avoid const-qualification.  This might not be correct.
+            let decl_cur = ty.declaration();
+            Ok(format!("{}{}", mod_qual(&decl_cur), decl_cur.spelling()))
         },
 
+        TK::ConstantArray => {
+            let elem_ty = try!(trans_type(ty.array_element_type()));
+            let len = ty.array_size();
+            Ok(format!("[{}; {}]", elem_ty, len))
+        },
+
+        // **Note**: This appears to happen when you have a type that is never defined anywhere.  No, I can't imagine how this could *possibly* be valid, but look at how `struct _TEB` is used by `winnt.h`.  Apparently, this is totally OK.
         TK::Unexposed
+
+        // **Note**: This isn't currently in `libc`, and does *not* have a platform-independent definition.
         | TK::Bool
         | TK::UInt128
         | TK::Int128
@@ -205,13 +263,10 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
         | TK::BlockPointer
         | TK::LValueReference
         | TK::RValueReference
-        | TK::Record
-        | TK::Enum
         | TK::ObjCInterface
         | TK::ObjCObjectPointer
         | TK::FunctionNoProto
         | TK::FunctionProto
-        | TK::ConstantArray
         | TK::Vector
         | TK::IncompleteArray
         | TK::VariableArray
@@ -246,7 +301,7 @@ fn get_token_lines(file: clang::File, tu_cache: &mut TuCache) -> Vec<(u32, Vec<c
     let path = file.file_name();
 
     // Architecture shouldn't matter since we just want the tokens.
-    let tu = tu_cache.parse_translation_unit(&path, Architecture::X86_32).unwrap();
+    let tu = tu_cache.parse_translation_unit(&path, &ExpConfig::DUMMY_CFG).unwrap();
 
     // Get the set of line numbers which *contain* a line continuation.
     let cont_lines: Vec<_> = util::read_lines(&path)
@@ -362,40 +417,91 @@ fn get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {
 pub enum Architecture {
     X86_32,
     X86_64,
+    Arm,
 }
 
-pub struct Config {
+impl Architecture {
+    fn to_features(self) -> Features {
+        use self::Architecture::*;
+        use features::Architectures as FA;
+        let arch = match self {
+            X86_32 => FA::X86_32,
+            X86_64 => FA::X86_64,
+            Arm => FA::Arm,
+        };
+        Features::from(arch)
+    }
+}
+
+#[derive(Clone, Debug, Hash)]
+pub struct ExpConfig {
+    pub arch: Architecture,
+    pub winver: (u16, u32),
+    pub native_cc: NativeCallConv,
+}
+
+impl ExpConfig {
+    pub const WINVER_WIN81: (u16, u32) = (0x0602, 0x06030000);
+
+    /// This *only* exists so we have something to give the TU cache when we're after tokens.
+    const DUMMY_CFG: ExpConfig = ExpConfig {
+        arch: Architecture::X86_32,
+        winver: ExpConfig::WINVER_WIN81,
+        native_cc: NativeCallConv::Stdcall,
+    };
+
+    const BASE_SWITCHES: &'static [&'static str] = &[
+        "-D_WIN32",
+
+        // This includes both Desktop and App partitions.
+        "-DWINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP"
+    ];
+
+    const X86_32_SWITCHES: &'static [&'static str] = &[
+        "--target=i686-pc-windows-gnu", "-D__X86__", "-D_M_IX86"
+    ];
+    const X86_64_SWITCHES: &'static [&'static str] = &[
+        "--target=x86_64-pc-windows-gnu" // "-D_WIN64", "-D_AMD64_", "-D__x86_64", "-D__x86_64__", "-D_M_AMD64", "_M_X64"
+    ];
+    const ARM_SWITCHES: &'static [&'static str] = &[
+        "--target=arm-pc-windows-gnu" // "-D__arm__", "-D_ARM_", "-D_M_ARM"
+    ];
+
+    fn switches(&self) -> Vec<String> {
+        use self::Architecture::*;
+
+        let mut defs: Vec<_> = Self::BASE_SWITCHES.iter().cloned().map(Into::into).collect();
+
+        // Version switches.
+        defs.push(format!("-DWINVER=0x{:04x}", self.winver.0));
+        defs.push(format!("-D_WIN32_WINNT=0x{:04x}", self.winver.0));
+        defs.push(format!("-DNTDDI_VERSION=0x{:08x}", self.winver.1));
+
+        // Architecture-specific switches.
+        let arch_defines: &[_] = match self.arch {
+            X86_32 => Self::X86_32_SWITCHES,
+            X86_64 => Self::X86_64_SWITCHES,
+            Arm => Self::ARM_SWITCHES,
+        };
+
+        defs.extend(arch_defines.iter().cloned().map(Into::into));
+
+        // Done.
+        defs
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GenConfig<'a> {
+    pub exp_configs: &'a [ExpConfig],
+    pub switches: &'a [&'a str],
     pub ignore_decl_spellings: Vec<Regex>,
     pub ignore_file_paths: Vec<Regex>,
 }
 
-impl Config {
-    fn defines_for_arch(&self, arch: Architecture) -> Vec<String> {
-        use self::Architecture::*;
-
-        const ALL: &'static [&'static str] = &[
-            // Because always.
-            "_WIN32",
-
-            // Windows 8.1.
-            "WINVER=0x0602",
-            "_WIN32_WINNT=0x0602",
-            "NTDDI_VERSION=0x06030000",
-
-            // Both Desktop and App partitions.
-            "WINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP",
-        ];
-
-        const X86_32_DEFINES: &'static [&'static str] = &["__X86__", "__i386__", "_M_IX86"];
-        const X86_64_DEFINES: &'static [&'static str] = &["_WIN64", "_AMD64_", "__x86_64", "__x86_64__", "_M_AMD64", "_M_X64"];
-
-        let arch_defines: &[_] = match arch {
-            X86_32 => X86_32_DEFINES,
-            X86_64 => X86_64_DEFINES,
-        };
-
-        fn as_def(s: &&str) -> String { format!("-D{}", s) }
-        ALL.iter().map(as_def).chain(arch_defines.iter().map(as_def)).collect()
+impl<'a> GenConfig<'a> {
+    fn switches(&self) -> &[&str] {
+        self.switches
     }
 
     fn should_ignore(&self, cursor: &Cursor) -> bool {
@@ -410,48 +516,107 @@ impl Config {
     }
 }
 
-pub struct Output;
+struct Output {
+    // [name => [(feat, cconv, annot, decl)]]
+    fn_decls: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
+}
 
 impl Output {
-    pub fn new() -> Self {
-        Output
+    fn new() -> Self {
+        Output {
+            fn_decls: HashMap::new(),
+        }
+    }
+
+    fn add_func_decl(&mut self, name: String, feat: Features, cconv: AbsCallConv, decl: String, annot: String) {
+        use std::mem::replace;
+        debug!("add_func_decl({:?}, {:?}, {:?}, {:?}, {:?})", name, feat, cconv, decl, annot);
+
+        let decls = self.fn_decls.entry(name).or_insert(vec![]);
+
+        // Is there already a decl which is compatible with this one?
+        for &mut (ref mut df, ref dcc, ref dd, ref mut da) in decls.iter_mut() {
+            if *dd == decl && *dcc == cconv {
+                debug!(".. merging");
+                // The decls are the same.  Just combine the feature sets together.
+                debug!(".. old feats: {:?}, {:?}", df, feat);
+                let new_df = replace(df, Features::default()).or(feat);
+                debug!(".. new feats: {:?}", new_df);
+                *df = new_df;
+                da.push_str(", ");
+                da.push_str(&annot);
+                return;
+            }
+        }
+
+        // Add it to the set of decls.
+        debug!(".. adding");
+        decls.push((feat, cconv, decl, annot));
     }
 }
 
-pub struct TuCache<'c> {
-    index: Rc<Index>,
-    cache: HashMap<TuCacheKey, Rc<TranslationUnit>>,
-    config: &'c Config,
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum AbsCallConv {
+    ExplicitlyC,
+    System,
 }
 
-impl<'c> TuCache<'c> {
-    pub fn new(index: Rc<Index>, config: &'c Config) -> TuCache<'c> {
+impl AbsCallConv {
+    fn as_str(self) -> &'static str {
+        use self::AbsCallConv::*;
+        match self {
+            ExplicitlyC => "C",
+            System => "system",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum NativeCallConv {
+    C,
+    Stdcall,
+}
+
+pub struct TuCache<'a> {
+    index: Rc<Index>,
+    cache: HashMap<TuCacheKey, Rc<TranslationUnit>>,
+    gen_config: &'a GenConfig<'a>,
+}
+
+impl<'a> TuCache<'a> {
+    pub fn new(index: Rc<Index>, gen_config: &'a GenConfig<'a>) -> TuCache<'a> {
         TuCache {
             index: index,
             cache: HashMap::new(),
-            config: config,
+            gen_config: gen_config,
         }
     }
 
     pub fn parse_translation_unit(
         &mut self,
         path: &str,
-        arch: Architecture,
+        exp_config: &ExpConfig,
     ) -> Result<Rc<TranslationUnit>, clang::ErrorCode> {
         let index_opts = TranslationUnitFlags::None
             | TranslationUnitFlags::DetailedPreprocessingRecord
             | TranslationUnitFlags::Incomplete
             ;
 
-        let key = TuCacheKey::new(path, arch);
+        let key = TuCacheKey::new(path, exp_config);
+        info!("parsing tu {:?} with {:?} ({:?})", path, exp_config, key);
 
         if let Some(rc_tu) = self.cache.get(&key) {
+            info!(".. already in cache");
             return Ok(rc_tu.clone())
         }
 
+        let switches: Vec<String> = self.gen_config.switches().iter().map(|&s| s.into())
+            .chain(exp_config.switches().into_iter())
+            .collect();
+
         let tu = try!(self.index.parse_translation_unit(
             path,
-            &self.config.defines_for_arch(arch),
+            &switches,
             &[],
             index_opts,
         ));
@@ -460,11 +625,15 @@ impl<'c> TuCache<'c> {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct TuCacheKey(String, Architecture);
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct TuCacheKey(String, u64);
 
 impl TuCacheKey {
-    pub fn new(path: &str, arch: Architecture) -> TuCacheKey {
-        TuCacheKey(path.into(), arch)
+    pub fn new(path: &str, exp_config: &ExpConfig) -> TuCacheKey {
+        use std::hash::{self, Hash, Hasher};
+        let mut hasher = hash::SipHasher::default();
+        exp_config.hash(&mut hasher);
+        let config_hash = hasher.finish();
+        TuCacheKey(path.into(), config_hash)
     }
 }

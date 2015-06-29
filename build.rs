@@ -148,8 +148,7 @@ impl WinVersion {{
             .join("\n"),
 
         from_u32_round_ups = vers.iter().cloned()
-            .filter(|&k| reverse.contains_key(&next_ver[&k]))
-            .map(|k| format!("            if v <= 0x{:08x} {{ return Some(WinVersion::{}); }}",
+            .map(|k| format!("        if v <= 0x{:08x} {{ return Some(WinVersion::{}); }}",
                 k, reverse[&k]))
             .join("\n"),
     ).unwrap();
