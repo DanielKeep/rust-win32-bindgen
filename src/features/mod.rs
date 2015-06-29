@@ -14,6 +14,15 @@ pub struct Features {
 }
 
 impl Features {
+    pub fn complement(self) -> Features {
+        debug!("Features::complement({:?})", self);
+        { let r = Features {
+            parts: { debug!(".. parts..."); self.parts.map(|p| !p) },
+            winver: { debug!(".. winver..."); self.winver.map(WinVersions::complement) },
+            arch: { debug!(".. arch..."); self.arch.map(|a| !a) },
+        }; debug!(".. done."); r }
+    }
+
     pub fn and(self, other: Features) -> Features {
         Features {
             parts: match (self.parts, other.parts) {
@@ -115,6 +124,7 @@ pub struct WinVersions(Vec<Range<u32>>);
 
 impl WinVersions {
     pub fn complement(self) -> WinVersions {
+        debug!("WinVersions::complement({:?})", self);
         if &*self.0 == &[0..!0] {
             return WinVersions(vec![0..0]);
         }
@@ -124,6 +134,7 @@ impl WinVersions {
         }
 
         let pts: Vec<_> = self.0.into_iter().flat_map(|ab| vec![ab.start, ab.end].into_iter()).collect();
+        debug!(".. pts: {:?}", pts);
 
         let pts: Vec<_> = match (pts[0] == 0, pts[pts.len()-1] == !0) {
             (true, true) => pts[1..pts.len()-1].into(),
@@ -134,12 +145,14 @@ impl WinVersions {
                 .chain(Some(!0))
                 .collect()
         };
+        debug!(".. pts: {:?}", pts);
 
         let ranges = pts.iter().cloned()
             .batching(|mut it| it.next().and_then(
                 |a| it.next().map(
                     |b| a..b)))
             .collect();
+        debug!(".. ranges: {:?}", ranges);
 
         WinVersions(ranges)
     }
@@ -155,7 +168,7 @@ impl WinVersions {
             assert!(a <= b);
             assert!(i <= j);
 
-            if a < i && b < i {
+            if b < i {
                 /*
                 Drop ab.
 
@@ -181,7 +194,7 @@ impl WinVersions {
                 */
                 acc.push(a..j);
                 ijs = &ijs[1..];
-            } else if i <= a && a <= j && j <= b {
+            } else if j < b {
                 /*
                 Drop ij.
 
@@ -190,7 +203,7 @@ impl WinVersions {
                 */
                 ijs = &ijs[1..];
             } else {
-                unreachable!()
+                panic!("unreachable: 0x{:08x}..0x{:08x}, 0x{:08x}..0x{:08x}", a, b, i, j);
             }
         }
 
@@ -209,7 +222,18 @@ impl WinVersions {
                 assert!(a <= b);
                 assert!(i <= j);
 
-                if a < i && b < i {
+                if a == b {
+                    /*
+                    Drop ab.
+                    */
+                    inner(acc, &mut abs[1..], ijs)
+                } else if i == j {
+                    /*
+                    Drop ij.
+                    */
+                    inner(acc, abs, &mut ijs[1..])
+                }
+                else if b < i {
                     /*
                     Emit a..b, drop ab.
 
@@ -236,7 +260,7 @@ impl WinVersions {
                     */
                     abs[0] = i..b;
                     inner(acc, abs, &mut ijs[1..])
-                } else if i <= a && a <= j && j <= b {
+                } else if j < a {
                     /*
                     Emit i..j, drop ij.
 
@@ -246,12 +270,18 @@ impl WinVersions {
                     acc.push(i..j);
                     inner(acc, abs, &mut ijs[1..])
                 } else {
-                    unreachable!()
+                    panic!("unreachable: 0x{:08x}..0x{:08x}, 0x{:08x}..0x{:08x}", a, b, i, j);
                 }
             }
         }
 
-        WinVersions(inner(vec![], &mut self.0, &mut other.0))
+        let mut ranges = inner(vec![], &mut self.0, &mut other.0);
+
+        if ranges.len() == 0 {
+            ranges.push(0..0);
+        }
+
+        WinVersions(ranges)
     }
 }
 
@@ -371,40 +401,41 @@ pub fn is_important_define(tok: &str) -> bool {
     }
 }
 
-pub fn define_feature(name: &str) -> Option<Features> {
-    match name {
-        "__X86__"
-        | "__i386__"
-        | "_M_IX86"
-        => Some(Architectures::X86_32.into()),
-        "_AMD64_"
-        | "__x86_64"
-        | "__x86_64__"
-        | "_M_AMD64"
-        | "_M_X64"
-        => Some(Architectures::X86_64.into()),
-        _ => None
+pub fn define_feature(name: &str) -> Features {
+    debug!("define_feature({:?})", name);
+    match cc::Node::eval_ident(name) {
+        Ok(value) => {
+            match value.to_features() {
+                Ok(f) => f,
+                Err(err) => panic!("error defining feature {:?}: {}", name, err)
+            }
+        },
+        Err(err) => panic!("error defining feature {:?}: {}", name, err)
     }
 }
 
-pub fn define_feature_complement(name: &str) -> Option<Features> {
-    match name {
-        "__X86__"
-        | "__i386__"
-        | "_M_IX86"
-        => Some(Architectures::X86_64.into()),
-        "_AMD64_"
-        | "__x86_64"
-        | "__x86_64__"
-        | "_M_AMD64"
-        | "_M_X64"
-        => Some(Architectures::X86_32.into()),
-        _ => None
+pub fn define_feature_expr(toks: &[String], loc: &clang::SourceLocation) -> Features {
+    debug!("define_feature_expr({:?}, {})", toks, loc.display_short());
+    if !has_important_defines(toks) {
+        debug!(".. nothing important");
+        return Features::default();
     }
-}
 
-pub enum PrimaryBranch { Yes, No }
+    let node = match cc::parse_conditional_expr(toks) {
+        Ok(Some((node, tail))) => {
+            if tail.len() != 0 {
+                panic!("could not fully parse cc expr at {} {:?}; leftover: {:?}", loc.display_short(), toks, tail)
+            }
+            node
+        },
+        Ok(None) => panic!("could not parse cc expr at {} {:?}", loc.display_short(), toks),
+        Err(err) => panic!("could not parse cc expr at {} {:?}: {}", loc.display_short(), toks, err)
+    };
 
-pub fn define_feature_expr(_toks: &[String], _pb: PrimaryBranch, _loc: &clang::SourceLocation) -> Option<Features> {
-    unimplemented!();
+    debug!(".. node: {:?}", node);
+
+    match node.clone().eval().and_then(|v| v.to_features()) {
+        Ok(f) => { debug!(".. f: {:?}", f); f },
+        Err(err) => panic!("error evaluating expr at {} {:?}: {}", loc.display_short(), node, err)
+    }
 }

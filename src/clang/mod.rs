@@ -153,14 +153,17 @@ impl TranslationUnit {
 ext_impl! { Rc<TranslationUnit> as RcTranslationUnitExt {
     fn tokenize_all_to_vec[](&self) -> Vec<Token> {
         unsafe {
-            let range = ll::clang_getNullRange();
+            debug!("tokenize_all_to_vec({:?})", self);
+            let cursor = self.cursor();
+            let range = ll::clang_getCursorExtent(cursor.1);
             let mut toks_ptr = ::std::ptr::null_mut();
             let mut toks_len = 0;
             ll::clang_tokenize(self.1, range, &mut toks_ptr, &mut toks_len);
             let toks_slice = ::std::slice::from_raw_parts(toks_ptr, toks_len as usize);
-            let toks = toks_slice.iter().map(|tok| Token::from_ll(self.clone(), *tok)).collect();
+            let toks: Vec<_> = toks_slice.iter().map(|tok| Token::from_ll(self.clone(), *tok)).collect();
             drop(toks_slice);
             ll::clang_disposeTokens(self.1, toks_ptr, toks_len);
+            debug!(".. toks: [..; {}]", toks.len());
             toks
         }
     }
@@ -573,6 +576,10 @@ impl SourceLocation {
         SourceLocationShortDisplay(self)
     }
 
+    pub fn file(&self) -> Option<File> {
+        self.instantiation_location().0
+    }
+
     pub fn line(&self) -> u32 {
         self.instantiation_location().1
     }
@@ -607,7 +614,7 @@ impl_Display! {
         match file {
             Some(file) => {
                 let path = PathBuf::from(file.file_name());
-                let path = path.file_name().unwrap();
+                let path = path.file_name().expect("file_name from path");
                 write!(f, "{}:{}:{}", path.to_str().unwrap(), l, c)
             },
             None => write!(f, "(unknown):{}:{}", l, c)

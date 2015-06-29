@@ -1,4 +1,6 @@
 #![feature(associated_consts)]
+#![feature(btree_range)]
+#![feature(collections_bound)]
 #![feature(cstr_to_str)]
 #![feature(rc_weak)]
 
@@ -27,19 +29,20 @@ use clang::{
 };
 
 use features::{
-    Features, PrimaryBranch,
-    has_important_defines,
-    define_feature, define_feature_complement, define_feature_expr,
+    Features,
+    define_feature, define_feature_expr,
 };
 
 struct Cache<'config> {
     tu: TuCache<'config>,
+    features: HashMap<String, BTreeMap<u32, Features>>,
 }
 
 impl<'config> Cache<'config> {
     fn new(index: Rc<Index>, config: &'config Config) -> Self {
         Cache {
             tu: TuCache::new(index, config),
+            features: HashMap::new(),
         }
     }
 }
@@ -63,7 +66,7 @@ pub fn process_header(path: &str, config: &Config) {
     }
 }
 
-fn process_decl(decl_cur: Cursor, _cache: &mut Cache, _arch: Architecture) {
+fn process_decl(decl_cur: Cursor, cache: &mut Cache, _arch: Architecture) {
     use clang::CursorKind as CK;
 
     let decl_kind = match decl_cur.kind() {
@@ -73,28 +76,51 @@ fn process_decl(decl_cur: Cursor, _cache: &mut Cache, _arch: Architecture) {
         Some(kind) => kind
     };
 
+    let decl_loc = decl_cur.location();
+
     debug!("process_decl: {}: {:?} {}",
-        decl_cur.location().display_short(),
+        decl_loc.display_short(),
         decl_kind,
         decl_cur.spelling());
 
-    // LASTEDIT: feat = get_features_at(decl.location.file.name, decl.location.line)
+    let feat = decl_loc.file()
+        .map(|file| get_features_at(file, decl_loc.line(), cache))
+        .unwrap_or_else(|| Features::default());
+
+    debug!("process_decl feat: {:?}", feat);
 }
 
-fn _get_token_lines(file: clang::File, cache: &mut Cache) -> Vec<(u32, Vec<clang::Token>)> {
-    use std::collections::HashMap;
+fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features {
+    use std::collections::Bound;
 
+    debug!("get_features_at({:?}, {}, _)", file.file_name(), line);
+    let path = file.file_name();
+
+    let tu_cache = &mut cache.tu;
+
+    let fmap = cache.features.entry(path.clone()).or_insert_with(||
+        get_features(get_token_lines(file, tu_cache))
+    );
+
+    fmap.range(Bound::Included(&line), Bound::Unbounded).next()
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| Features::default())
+}
+
+fn get_token_lines(file: clang::File, tu_cache: &mut TuCache) -> Vec<(u32, Vec<clang::Token>)> {
+    debug!("get_token_lines({:?}, _)", file.file_name());
     let path = file.file_name();
 
     // Architecture shouldn't matter since we just want the tokens.
-    let tu = cache.tu.parse_translation_unit(&path, Architecture::X86_32).unwrap();
+    let tu = tu_cache.parse_translation_unit(&path, Architecture::X86_32).unwrap();
 
     // Get the set of line numbers which *contain* a line continuation.
     let cont_lines: Vec<_> = util::read_lines(&path)
         .map(|rs| rs.unwrap())
         .enumerate()
         .filter(|&(_, ref s)| s.trim_right().ends_with("\\"))
-        .map(|(i, _)| i as u32) // TODO: checked
+        // +1 because enumerate is 0-based, line numbers are 1-based
+        .map(|(i, _)| (i + 1) as u32) // TODO: checked
         .collect();
 
     // Work out the starting line for continued lines.
@@ -114,7 +140,8 @@ fn _get_token_lines(file: clang::File, cache: &mut Cache) -> Vec<(u32, Vec<clang
     tu.tokenize_all_to_vec().into_iter().group_by(remap_line_number).collect()
 }
 
-fn _get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {
+fn get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {
+    debug!("get_features([..; {}])", tls.len());
     /*
     The way this works is that we have to walk through *all* the lines, looking for preprocessor conditional compilation directives.  When we find them, we interpret them and push the enabled feature tests on to the stack.  Then, when we find something that *isn't* a conditional directive *and* the features have changed since the last time we did so, we add an entry to the map.
     */
@@ -122,13 +149,22 @@ fn _get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> 
 
     fn fd() -> Features { Features::default() }
 
-    fn seq(lhs: &[String], rhs: &[&'static str]) -> bool {
+    fn seq(lhs: &[String], lhs_len: usize, rhs: &[&'static str]) -> bool {
+        use std::cmp::min;
+        let lhs = &lhs[..min(lhs.len(), lhs_len)];
         lhs.len() == rhs.len()
             && lhs.iter().zip(rhs.iter()).all(|(l,r)| &**l == *r)
     }
 
-    fn append(_stack: &Vec<Features>, _f: Features) {
-        unimplemented!()
+    fn append(stack: &mut Vec<Features>, f: Features) {
+        debug!("append([..; {}], {:?})", stack.len(), f);
+        let f = stack.last().expect("non-empty stack").clone().and(f);
+        stack.push(f);
+    }
+
+    fn pop(stack: &mut Vec<Features>) {
+        debug!("pop([..; {}])", stack.len());
+        stack.pop();
     }
 
     let mut map = BTreeMap::new();
@@ -138,50 +174,50 @@ fn _get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> 
 
     for (line_num, toks) in tls {
         let loc = toks[0].location();
-        let ts: Vec<_> = toks.iter().map(|t| t.spelling()).collect();
+        let ts: Vec<_> = toks.iter()
+            .map(|t| t.spelling())
+            .filter(|s| !(s.starts_with("/*") || s.starts_with("//")))
+            .collect();
+        let ts = &*ts;
+        debug!("get_features(..): {}: {:?}", loc.display_short(), ts);
+        // debug!(".. stack: {:?}", stack);
 
-        if seq(&ts[..2], &["#", "if"]) {
-            if has_important_defines(&ts[2..]) {
-                append(&mut stack, define_feature_expr(&ts[2..], PrimaryBranch::Yes, &loc).unwrap_or(fd()));
-            } else {
-                append(&mut stack, fd());
-            }
-        } else if seq(&ts[..2], &["#", "ifdef"]) && ts.len() == 3 {
-            if has_important_defines(&ts[2..]) {
-                append(&mut stack, define_feature(&ts[2]).unwrap_or(fd()));
-            } else {
-                append(&mut stack, fd());
-            }
-        } else if seq(&ts[..2], &["#", "ifndef"]) && ts.len() == 3 {
-            if has_important_defines(&ts[2..]) {
-                append(&mut stack, define_feature_complement(&ts[2]).unwrap_or(fd()));
-            } else {
-                append(&mut stack, fd());
-            }
-        } else if seq(&ts[..2], &["#", "elif"]) {
-            stack.pop();
-            if has_important_defines(&ts[2..]) {
-                append(&mut stack, define_feature_expr(&ts[2..], PrimaryBranch::Yes, &loc).unwrap_or(fd()));
-            } else {
-                append(&mut stack, fd());
-            }
-        } else if seq(&ts[..2], &["#", "else"]) {
-            stack.pop();
+        if seq(&ts, 2, &["#", "if"]) {
+            debug!(".. #if {:?}", &ts[2..]);
+            append(&mut stack, define_feature_expr(&ts[2..], &loc));
+        } else if seq(&ts, 2, &["#", "ifdef"]) && ts.len() == 3 {
+            debug!(".. #ifdef {:?}", &ts[2..]);
+            append(&mut stack, define_feature(&ts[2]));
+        } else if seq(&ts, 2, &["#", "ifndef"]) && ts.len() == 3 {
+            debug!(".. #ifndef {:?}", &ts[2..]);
+            append(&mut stack, define_feature(&ts[2]).complement());
+            // debug!(".. #ifndef done");
+        } else if seq(&ts, 2, &["#", "elif"]) {
+            debug!(".. #elif {:?}", &ts[2..]);
+            pop(&mut stack);
+            append(&mut stack, define_feature_expr(&ts[2..], &loc));
+        } else if seq(&ts, 2, &["#", "else"]) {
+            debug!(".. #else");
+            pop(&mut stack);
             append(&mut stack, fd());
-        } else if seq(&ts[..2], &["#", "endif"]) {
-            stack.pop();
+        } else if seq(&ts, 2, &["#", "endif"]) {
+            debug!(".. #endif");
+            pop(&mut stack);
         } else {
+            // debug!(".. boring");
             // Work out what the last set of features we've seen is.
             let do_insert = {
-                let prev_feat = map.values().next_back().unwrap();
-                *prev_feat != *stack.last().unwrap()
+                let prev_feat = map.values().next_back().expect("previous feature");
+                *prev_feat != *stack.last().expect("non-empty stack")
             };
+            // debug!(".. do_insert: {:?}", do_insert);
             if do_insert {
-                map.insert(line_num, stack.last().unwrap().clone());
+                map.insert(line_num, stack.last().expect("non-empty stack").clone());
             }
         }
     }
 
+    debug!(".. done ({} entries)", map.len());
     map
 }
 
