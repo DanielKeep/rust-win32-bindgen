@@ -357,6 +357,14 @@ impl Architectures {
             | "_M_ARM"
             => Some(Architectures::Arm),
 
+            "_M_MRX000"
+            | "_M_ALPHA"
+            | "_M_PPC"
+            | "__ia64__"
+            | "_IA64_"
+            | "_M_IA64"
+            => Some(Architectures::None),
+
             _ => None
         }
     }
@@ -403,7 +411,7 @@ pub fn is_important_define(tok: &str) -> bool {
 
 pub fn define_feature(name: &str) -> Features {
     debug!("define_feature({:?})", name);
-    match cc::Node::eval_ident(name) {
+    match cc::Node::eval_defined(name) {
         Ok(value) => {
             match value.to_features() {
                 Ok(f) => f,

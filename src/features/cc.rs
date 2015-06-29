@@ -50,7 +50,10 @@ impl Node {
         }
     }
 
-    pub fn eval_ident(ident: &str) -> Result<Value, String> {
+    /**
+    Evaluates a given identifier.
+    */
+    fn eval_ident(ident: &str) -> Result<Value, String> {
         match ident {
             "NTDDI_VERSION" => return Ok(Value::FullVersion),
             "WINVER" | "_WIN32_WINNT" => return Ok(Value::ShortVersion),
@@ -78,7 +81,12 @@ impl Node {
         Ok(Value::Ignore)
     }
 
-    fn eval_defined(ident: &str) -> Result<Value, String> {
+    /**
+    Evaluates `defined(ident)`.
+
+    This should *also* be used to process the argument to `#ifdef` and `#ifndef` directives.
+    */
+    pub fn eval_defined(ident: &str) -> Result<Value, String> {
         match ident {
             "NTDDI_VERSION"
             | "_WIN32_WINNT"
