@@ -144,7 +144,7 @@ impl ExpansionConfig {
 }
 
 fn wv(s: &str) -> u32 {
-    win32_bindgen::generated::winver::WinVersion::from_name(s).unwrap() as u32
+    win32_bindgen::WinVersion::from_name(s).unwrap() as u32
 }
 
 #[allow(non_camel_case_types)]
