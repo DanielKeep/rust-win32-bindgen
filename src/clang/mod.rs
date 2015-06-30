@@ -732,6 +732,12 @@ impl Type {
         }
     }
 
+    pub fn canonical(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getCanonicalType(self.1))
+        }
+    }
+
     pub fn declaration(&self) -> Cursor {
         unsafe {
             Cursor::from_ll(ll::clang_getTypeDeclaration(self.1)).expect("valid cursor for Type::declaration")

@@ -203,6 +203,14 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
     match ty.kind() {
         TK::Invalid => Err("invalid type".into()),
 
+        TK::Unexposed => {
+            let canon_ty = ty.canonical();
+            match canon_ty.kind() {
+                TK::Unexposed => Err(format!("recursively unexposed type {}", canon_ty.spelling())),
+                _ => trans_type(canon_ty)
+            }
+        },
+
         // Basic types.
         TK::Void => Ok("libc::c_void".into()),
         TK::Char_U | TK::UChar => Ok("libc::c_uchar".into()),
@@ -228,9 +236,8 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
         TK::Pointer => {
             // We want to know whether the thing we're pointing to is const or not.
             let pointee_ty = ty.pointee();
-            Ok(format!("*{} {}",
-                if pointee_ty.is_const_qualified() { "const" } else { "mut" },
-                try!(trans_type(pointee_ty))))
+            let mut_ = if pointee_ty.is_const_qualified() { "const" } else { "mut" };
+            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty))))
         },
 
         TK::Record
@@ -243,16 +250,20 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
         },
 
         TK::ConstantArray => {
-            let elem_ty = try!(trans_type(ty.array_element_type()));
+            let elem_ty = ty.array_element_type();
+            let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
             let len = ty.array_size();
-            Ok(format!("[{}; {}]", elem_ty, len))
+            Ok(format!("*{} [{}; {}]", mut_, try!(trans_type(elem_ty)), len))
         },
 
-        // **Note**: This appears to happen when you have a type that is never defined anywhere.  No, I can't imagine how this could *possibly* be valid, but look at how `struct _TEB` is used by `winnt.h`.  Apparently, this is totally OK.
-        TK::Unexposed
+        TK::IncompleteArray => {
+            let elem_ty = ty.array_element_type();
+            let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
+            Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty))))
+        },
 
         // **Note**: This isn't currently in `libc`, and does *not* have a platform-independent definition.
-        | TK::Bool
+        TK::Bool
         | TK::UInt128
         | TK::Int128
         | TK::LongDouble
@@ -270,7 +281,6 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
         | TK::FunctionNoProto
         | TK::FunctionProto
         | TK::Vector
-        | TK::IncompleteArray
         | TK::VariableArray
         | TK::DependentSizedArray
         | TK::MemberPointer
