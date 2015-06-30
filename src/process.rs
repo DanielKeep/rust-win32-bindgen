@@ -78,6 +78,29 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
 
     info!("generating output...");
     {
+        let typedef_decls = output.typedef_decls;
+        let mut names: Vec<_> = typedef_decls.keys().collect();
+        names.sort();
+
+        for (name, &ref decls) in names.into_iter().map(|k| (k, &typedef_decls[k])) {
+            let mut decl_set = vec![];
+            for &(ref feat, ref decl, ref annot) in decls {
+                debug!(".. {} ({}): {:?}", name, annot, feat);
+                decl_set.push(format!("{decl} /* {annot} */",
+                    annot = annot,
+                    decl = decl.replace(
+                        "{feat}",
+                        &format!("{:<33}", feat.to_string())
+                    )
+                ));
+            }
+            decl_set.sort();
+            for decl in decl_set {
+                println!("{}", decl);
+            }
+        }
+    }
+    {
         let struct_decls = output.struct_decls;
         let mut names: Vec<_> = struct_decls.keys().collect();
         names.sort();
@@ -233,6 +256,7 @@ where Defer: FnMut(Cursor)
 
         CK::StructDecl => process_struct_decl(decl_cur, output, feat, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
+        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat),
 
         kind => {
             warn!("could-not-translate unsupported {:?} {} at {}",
@@ -390,6 +414,23 @@ fn process_function_decl(
 
     let annot = decl_cur.location().display_short().to_string();
     output.add_func_decl(name, feat, cconv, decl, annot);
+    Ok(())
+}
+
+/**
+Process a single structure declaration.
+*/
+fn process_typedef_decl(decl_cur: Cursor, output: &mut Output, feat: Features) -> Result<(), String> {
+    debug!("process_typedef_decl({}, ..)", decl_cur);
+    let name = decl_cur.spelling();
+
+    let ty = decl_cur.typedef_decl_underlying_type();
+    let ty = try!(trans_type(ty));
+
+    let decl = format!("{{feat}}pub type {} = {};", name, ty);
+
+    let annot = decl_cur.location().display_short().to_string();
+    output.add_typedef_decl(name, feat, decl, annot);
     Ok(())
 }
 
@@ -613,6 +654,9 @@ struct Output {
 
     /// `[name => [(feat, decl, annot)]]`
     struct_decls: HashMap<String, Vec<(Features, String, String)>>,
+
+    /// `[name => [(feat, decl, annot)]]`
+    typedef_decls: HashMap<String, Vec<(Features, String, String)>>,
 }
 
 impl Output {
@@ -620,6 +664,7 @@ impl Output {
         Output {
             fn_decls: HashMap::new(),
             struct_decls: HashMap::new(),
+            typedef_decls: HashMap::new(),
         }
     }
 
@@ -662,6 +707,35 @@ impl Output {
         debug!("add_struct_decl({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
 
         let decls = self.struct_decls.entry(name).or_insert(vec![]);
+
+        // Is there already a decl which is compatible with this one?
+        for &mut (ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+            if *dd == decl {
+                debug!(".. merging");
+                // The decls are the same.  Just combine the feature sets together.
+                let new_df = replace(df, Features::default()).or(feat);
+                *df = new_df;
+                da.push_str(", ");
+                da.push_str(&annot);
+                return;
+            }
+        }
+
+        // Add it to the set of decls.
+        debug!(".. adding");
+        decls.push((feat, decl, annot));
+    }
+
+    /**
+    Adds a typedef declaration.
+
+    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
+    */
+    fn add_typedef_decl(&mut self, name: String, feat: Features, decl: String, annot: String) {
+        use std::mem::replace;
+        debug!("add_typedef_decl({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
+
+        let decls = self.typedef_decls.entry(name).or_insert(vec![]);
 
         // Is there already a decl which is compatible with this one?
         for &mut (ref mut df, ref dd, ref mut da) in decls.iter_mut() {

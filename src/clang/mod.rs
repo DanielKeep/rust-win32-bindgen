@@ -383,6 +383,12 @@ impl Cursor {
         }
     }
 
+    pub fn typedef_decl_underlying_type(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getTypedefDeclUnderlyingType(self.1))
+        }
+    }
+
     pub fn visit_children<F>(&self, mut f: F) -> VisitTermination
     where F: FnMut(Cursor, Option<Cursor>) -> VisitAction {
         extern "C" fn thunk<F>(
