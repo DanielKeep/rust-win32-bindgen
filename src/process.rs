@@ -20,6 +20,8 @@ use util;
 This is effectively the "entry point" for processing.  Given a header and a configuration, it attempts to generate a Rust binding.
 */
 pub fn process_header(path: &str, gen_config: &GenConfig) {
+    info!("using clang version {}", clang::version());
+
     let index = Index::create(
         /*exclude_declarations_from_pch*/ false,
         /*display_diagnostics*/ false,
@@ -32,19 +34,72 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     for exp_config in &gen_config.exp_configs {
         info!("expanding with config {:?}", exp_config);
         info!(".. switches: {:?}", exp_config.switches());
-        let root_tu = cache.tu.parse_translation_unit(path, exp_config).unwrap();
+        let root_tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse root TU");
         let feat_mask = exp_config.arch.to_features();
 
-        for decl_cur in root_tu.cursor().children().into_iter() {
+        type Vcii = ::std::vec::IntoIter<Cursor>;
+
+        let mut decl_curs = root_tu.cursor().children().into_iter();
+        let mut deferred: Vec<Cursor> = vec![];
+        let mut deferred_iter = None;
+
+        fn next_from(dc: &mut Vcii, d: &mut Vec<Cursor>, di: &mut Option<Vcii>) -> Option<Cursor> {
+            use std::mem::replace;
+
+            if let Some(cur) = di.as_mut().and_then(|di| di.next()) {
+                return Some(cur)
+            }
+
+            *di = None;
+
+            if d.len() > 0 {
+                *di = Some(replace(d, vec![]).into_iter());
+                return next_from(dc, d, di);
+            }
+
+            dc.next()
+        }
+
+        while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
             if gen_config.should_ignore(&decl_cur) {
                 debug!("ignoring: {}", decl_cur);
             } else {
-                process_decl(decl_cur, feat_mask.clone(), exp_config.native_cc, &mut output, &mut cache);
+                process_decl(
+                    decl_cur,
+                    feat_mask.clone(),
+                    exp_config.native_cc,
+                    &mut output,
+                    &mut cache,
+                    &mut |cur| deferred.push(cur),
+                );
             }
         }
     }
 
     info!("generating output...");
+    {
+        let struct_decls = output.struct_decls;
+        let mut names: Vec<_> = struct_decls.keys().collect();
+        names.sort();
+
+        for (name, &ref decls) in names.into_iter().map(|k| (k, &struct_decls[k])) {
+            let mut decl_set = vec![];
+            for &(ref feat, ref decl, ref annot) in decls {
+                debug!(".. {} ({}): {:?}", name, annot, feat);
+                decl_set.push(format!("{decl} /* {annot} */",
+                    annot = annot,
+                    decl = decl.replace(
+                        "{feat}",
+                        &format!("{:<33}", feat.to_string())
+                    )
+                ));
+            }
+            decl_set.sort();
+            for decl in decl_set {
+                println!("{}", decl);
+            }
+        }
+    }
     {
         let fn_decls = output.fn_decls;
         let mut names: Vec<_> = fn_decls.keys().collect();
@@ -122,7 +177,16 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
 /**
 Processes a single declaration.
 */
-fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv, output: &mut Output, cache: &mut Cache) {
+fn process_decl<Defer>(
+    decl_cur: Cursor,
+    feat_mask: Features,
+    native_cc: NativeCallConv,
+    output: &mut Output,
+    cache: &mut Cache,
+    defer: &mut Defer,
+)
+where Defer: FnMut(Cursor)
+{
     use clang::CursorKind as CK;
 
     let decl_kind = match decl_cur.kind() {
@@ -160,21 +224,129 @@ fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv
         },
     };
 
-    match decl_kind {
+    let decl_cur_copy = decl_cur.clone();
+
+    let result = match decl_kind {
         CK::InclusionDirective
         | CK::MacroInstantiation
         => unreachable!(),
 
+        CK::StructDecl => process_struct_decl(decl_cur, output, feat, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
 
-        kind => warn!("could-not-translate unsupported {:?} {} at {}", kind, decl_cur.spelling(), decl_loc.display_short())
+        kind => {
+            warn!("could-not-translate unsupported {:?} {} at {}",
+                kind, decl_cur.spelling(), decl_loc.display_short());
+            Ok(())
+        }
+    };
+
+    if let Err(err) = result {
+        warn!("could-not-translate misc {}: {}", decl_cur_copy, err);
     }
+}
+
+/**
+Process a single structure declaration.
+*/
+fn process_struct_decl<Defer>(
+    decl_cur: Cursor,
+    output: &mut Output,
+    feat: Features,
+    defer: &mut Defer,
+) -> Result<(), String>
+where Defer: FnMut(Cursor)
+{
+    use clang::CursorKind as CK;
+
+    debug!("process_struct_decl({}, ..)", decl_cur);
+
+    let name = try!(name_for_maybe_anon(&decl_cur));
+    assert!(name != "");
+
+    let annot = decl_cur.location().display_short().to_string();
+
+    match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
+        (false, false) => {
+            info!(".. skipping forward declaration");
+            return Ok(());
+        },
+        (false, true) => {
+            // There *is no* definition!
+            info!(".. no definition found");
+            let decl = format!("#[repr(C)] pub struct {};", name);
+            output.add_struct_decl(name, feat, decl, annot);
+            return Ok(())
+        },
+        (true, _) => ()
+    }
+
+    let mut fields = vec![];
+
+    for child_cur in decl_cur.children() {
+        match child_cur.kind() {
+            CK::StructDecl
+            | CK::UnionDecl
+            => {
+                // Defer.
+                defer(child_cur);
+            },
+
+            CK::FieldDecl => {
+                let name = child_cur.spelling();
+                let ty = try!(trans_type(child_cur.type_()));
+                fields.push(format!("{}: {}", name, ty));
+            },
+
+            CK::UnexposedAttr => {
+                // Skip.
+            },
+
+            other => panic!("nyi {:?}", other)
+        }
+    }
+
+    let decl = match fields.len() {
+        // Why did this have to be special-cased? :(
+        0 => format!(
+            "#[repr(C)] pub struct {name};",
+            name = name,
+        ),
+        _ => format!(
+            "#[repr(C)] pub struct {name} {{ {fields} }}",
+            name = name,
+            fields = fields.connect(", "),
+        )
+    };
+
+    output.add_struct_decl(name, feat, decl, annot);
+    Ok(())
+}
+
+/**
+Works out a name for the given structure, even if it doesn't otherwise *have* one.
+*/
+fn name_for_maybe_anon(decl_cur: &Cursor) -> Result<String, String> {
+    // TODO: Use clang_Cursor_isAnonymous once its released.
+    let name = decl_cur.spelling();
+    if name == "" {
+        /*
+        This is *probably* an anonymous type.  We need to give it a name that will be both reasonable *and* stable across invocations.
+        */
+        return Err(format!("anonymous-struct {}", decl_cur));
+    }
+    Ok(name)
 }
 
 /**
 Process a single function declaration.
 */
-fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, native_cc: NativeCallConv) {
+fn process_function_decl(
+    decl_cur: Cursor,
+    output: &mut Output,
+    feat: Features,
+    native_cc: NativeCallConv
+) -> Result<(), String> {
     use clang::CallingConv as CC;
     use ::NativeCallConv as NCC;
 
@@ -184,8 +356,7 @@ fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, 
     let children = decl_cur.children();
     if children.len() > 0 && children.last().unwrap().kind() == CursorKind::CompoundStmt {
         // Err... *might be*
-        warn!("could-not-translate inline-fn {}", decl_cur);
-        return;
+        return Err("inline-fn".into());
     }
 
     let ty = decl_cur.type_();
@@ -195,34 +366,31 @@ fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, 
         (CC::C, _) => AbsCallConv::ExplicitlyC,
         (CC::X86StdCall, NCC::Stdcall) => AbsCallConv::System,
         (cconv, _) => {
-            warn!("could-not-translate bad-cconv {} {:?}", decl_cur, cconv);
-            return;
+            return Err(format!("bad-cconv {:?}", cconv));
         }
     };
 
-    // Wrap this in a closure because I'm too lazy to do proper error handling right now.  Later, I promise.
-    match (|| -> Result<(), String> {
-        let name = decl_cur.spelling();
-        let res_ty = if ty.result().kind() == clang::TypeKind::Void {
-            String::new()
-        } else {
-            format!(" -> {}", try!(trans_type(ty.result())))
-        };
-        let arg_tys: Vec<String> = try!(ty.args().into_iter().map(trans_type).collect());
-        let arg_tys = arg_tys.connect(", ");
-        let decl = format!(
-            r#"{{feat}}pub fn {name}({arg_tys}){res_ty};"#,
-            name = name,
-            arg_tys = arg_tys,
-            res_ty = res_ty,
-        );
-        let annot = decl_cur.location().display_short().to_string();
-        output.add_func_decl(name, feat, cconv, decl, annot);
-        Ok(())
-    })() {
-        Ok(()) => (),
-        Err(err) => warn!("could-not-translate misc {} {}", decl_cur, err)
-    }
+    let name = decl_cur.spelling();
+
+    let res_ty = if ty.result().kind() == clang::TypeKind::Void {
+        String::new()
+    } else {
+        format!(" -> {}", try!(trans_type(ty.result())))
+    };
+
+    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(trans_type).collect());
+    let arg_tys = arg_tys.connect(", ");
+
+    let decl = format!(
+        r#"{{feat}}pub fn {name}({arg_tys}){res_ty};"#,
+        name = name,
+        arg_tys = arg_tys,
+        res_ty = res_ty,
+    );
+
+    let annot = decl_cur.location().display_short().to_string();
+    output.add_func_decl(name, feat, cconv, decl, annot);
+    Ok(())
 }
 
 /**
@@ -442,12 +610,16 @@ Note that `annot` is used for "annotations", which are free-form strings that ma
 struct Output {
     /// `[name => [(feat, cconv, decl, annot)]]`
     fn_decls: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
+
+    /// `[name => [(feat, decl, annot)]]`
+    struct_decls: HashMap<String, Vec<(Features, String, String)>>,
 }
 
 impl Output {
     fn new() -> Self {
         Output {
             fn_decls: HashMap::new(),
+            struct_decls: HashMap::new(),
         }
     }
 
@@ -478,6 +650,35 @@ impl Output {
         // Add it to the set of decls.
         debug!(".. adding");
         decls.push((feat, cconv, decl, annot));
+    }
+
+    /**
+    Adds a structure declaration.
+
+    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
+    */
+    fn add_struct_decl(&mut self, name: String, feat: Features, decl: String, annot: String) {
+        use std::mem::replace;
+        debug!("add_struct_decl({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
+
+        let decls = self.struct_decls.entry(name).or_insert(vec![]);
+
+        // Is there already a decl which is compatible with this one?
+        for &mut (ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+            if *dd == decl {
+                debug!(".. merging");
+                // The decls are the same.  Just combine the feature sets together.
+                let new_df = replace(df, Features::default()).or(feat);
+                *df = new_df;
+                da.push_str(", ");
+                da.push_str(&annot);
+                return;
+            }
+        }
+
+        // Add it to the set of decls.
+        debug!(".. adding");
+        decls.push((feat, decl, annot));
     }
 }
 

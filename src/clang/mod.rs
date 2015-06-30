@@ -9,6 +9,12 @@ use util::{BoolUtil, CheckedInto, ToCStr, TryFrom, TryInto};
 
 pub mod ll;
 
+pub fn version() -> String {
+    unsafe {
+        cxstring_to_string(ll::clang_getClangVersion())
+    }
+}
+
 // This is so the rc type can be switched out later.
 fn rc<T>(v: T) -> Rc<T> {
     Rc::new(v)
@@ -325,6 +331,24 @@ impl Cursor {
         v
     }
 
+    pub fn definition(&self) -> Option<Cursor> {
+        unsafe {
+            Cursor::from_ll(ll::clang_getCursorDefinition(self.1))
+        }
+    }
+
+    pub fn is_definition(&self) -> bool {
+        unsafe {
+            ll::clang_isCursorDefinition(self.1) != 0
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        unsafe {
+            ll::clang_Cursor_isNull(self.1) != 0
+        }
+    }
+
     pub fn kind(&self) -> CursorKind {
         unsafe {
             ll::clang_getCursorKind(self.1).try_into().expect("valid kind for cursor")
@@ -385,6 +409,16 @@ impl Cursor {
         match r {
             0 => VisitTermination::Normal,
             _ => VisitTermination::Early
+        }
+    }
+}
+
+impl Eq for Cursor {}
+
+impl PartialEq for Cursor {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe {
+            ll::clang_equalCursors(self.1, other.1) != 0
         }
     }
 }
