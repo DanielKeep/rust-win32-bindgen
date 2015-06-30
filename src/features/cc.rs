@@ -17,6 +17,7 @@ pub enum Node {
     Le(Box<Node>, Box<Node>),
     Gt(Box<Node>, Box<Node>),
     Ge(Box<Node>, Box<Node>),
+    Rs(Box<Node>, Box<Node>),
     OsVer(Box<Node>),
     SpVer(Box<Node>),
     Part(Box<Node>),
@@ -40,6 +41,7 @@ impl Node {
             Le(ref l, ref r) => Ok(try!(try!(l.eval()).le(try!(r.eval())))),
             Gt(ref l, ref r) => Ok(try!(try!(l.eval()).gt(try!(r.eval())))),
             Ge(ref l, ref r) => Ok(try!(try!(l.eval()).ge(try!(r.eval())))),
+            Rs(ref l, ref r) => Ok(try!(try!(l.eval()).rs(try!(r.eval())))),
             OsVer(ref n) => try!(n.eval()).os_ver(),
             SpVer(ref n) => try!(n.eval()).sp_ver(),
             Part(ref n) => Node::eval_partition(try!(n.eval())),
@@ -157,6 +159,7 @@ impl Value {
         match self {
             Bool(_) => Ok(Features::default()),
             Feat(f) => Ok(f),
+            Part(p) => Ok(p.into()),
             FullVersionValue(v) => {
                 let wv = WinVersion::from_u32_round_up(v).expect("valid full version");
                 Ok(WinVersions::from(wv).into())
@@ -178,6 +181,7 @@ impl Value {
             Ignore => Ok(Ignore),
             Bool(b) => Ok(Bool(!b)),
             Feat(f) => Ok(Feat(f.complement())),
+            Part(p) => Ok(Part(!p)),
             n => Err(format!("invalid op: ! {:?}", n))
         }
     }
@@ -191,6 +195,7 @@ impl Value {
             (Bool(true), Feat(f)) | (Feat(f), Bool(true)) => Ok(Feat(f)),
             (Bool(false), Feat(_)) | (Feat(_), Bool(false)) => Ok(Ignore),
             (Feat(l), Feat(r)) => Ok(Feat(l.and(r))),
+            (Part(l), Part(r)) => Ok(Part(l & r)),
             (l, r) => Err(format!("invalid op: {:?} && {:?}", l, r))
         }
     }
@@ -199,8 +204,10 @@ impl Value {
         use self::Value::*;
         match (self, rhs) {
             (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Bool(b)) | (Bool(b), Ignore) => Ok(Bool(b)),
             (Ignore, Feat(f)) | (Feat(f), Ignore) => Ok(Feat(f)),
             (Feat(l), Feat(r)) => Ok(Feat(l.or(r))),
+            (Part(l), Part(r)) => Ok(Part(l | r)),
             (l, r) => Err(format!("invalid op: {:?} || {:?}", l, r))
         }
     }
@@ -226,6 +233,12 @@ impl Value {
                 };
                 Ok(Feat(wv.into()))
             },
+            (ShortVersion, Int(v)) | (Int(v), ShortVersion) => {
+                let start = WinVersion::from_u32_round_up(v << 16).expect("valid version for sv == int");
+                let end = WinVersion::from_u32_round_up(((v << 16) + 0x1_0000));
+                let wv = WinVersions::from(Some(start)..end);
+                Ok(Feat(wv.into()))
+            }
             (Ignore, Ignore) => Ok(Ignore),
             (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
             (l, r) => Err(format!("invalid op: {:?} == {:?}", l, r))
@@ -327,10 +340,21 @@ impl Value {
         }
     }
 
+    fn rs(self, rhs: Value) -> Result<Value, String> {
+        use self::Value::*;
+        match (self, rhs) {
+            (FullVersionValue(v), Int(16)) => Ok(ShortVersionValue(v >> 16)),
+            (Ignore, Ignore) => Ok(Ignore),
+            (Ignore, Int(_)) | (Int(_), Ignore) => Ok(Ignore),
+            (l, r) => Err(format!("invalid op: {:?} >> {:?}", l, r))
+        }
+    }
+
     fn os_ver(self) -> Result<Value, String> {
         use self::Value::*;
         match self {
             FullVersion => Ok(OsVersion),
+            FullVersionValue(v) => Ok(FullVersionValue(v & 0xFFFF_0000)),
             n => Err(format!("invalid op: OSVER({:?})", n))
         }
     }
@@ -455,7 +479,7 @@ fn parse_relational_expr<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
     debug!("parse_relational_expr({:?})", toks);
     parse_guard!(toks);
 
-    parse_unary_expr(toks).ro_and_then(|(lhs, toks)|
+    parse_shift_expr(toks).ro_and_then(|(lhs, toks)|
         (parse_munch(toks, "<")
             .ro_and_then(|toks| parse_relational_expr(toks))
             .ro_and_then(|(rhs, tail)| Ok(Some((Node::Lt(Box::new(lhs.clone()), Box::new(rhs)), tail))))
@@ -471,6 +495,19 @@ fn parse_relational_expr<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
         .ro_or_else(|| parse_munch(toks, ">=")
             .ro_and_then(|toks| parse_relational_expr(toks))
             .ro_and_then(|(rhs, tail)| Ok(Some((Node::Ge(Box::new(lhs.clone()), Box::new(rhs)), tail))))
+        )
+        .ro_or_else(|| Ok(Some((lhs, toks))))
+    )
+}
+
+fn parse_shift_expr<S: AsRef<str> + Debug>(toks: &[S]) -> ParseResult<S> {
+    debug!("parse_shift_expr({:?})", toks);
+    parse_guard!(toks);
+
+    parse_unary_expr(toks).ro_and_then(|(lhs, toks)|
+        (parse_munch(toks, ">>")
+            .ro_and_then(|toks| parse_shift_expr(toks))
+            .ro_and_then(|(rhs, tail)| Ok(Some((Node::Rs(Box::new(lhs.clone()), Box::new(rhs)), tail))))
         )
         .ro_or_else(|| Ok(Some((lhs, toks))))
     )

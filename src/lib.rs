@@ -119,11 +119,13 @@ fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv
         .map(|file| get_features_at(file, decl_loc.line(), cache))
         .unwrap_or_else(|| Features::default());
 
-    debug!("process_decl feat: {:?}", feat);
+    debug!(".. process_decl feat: {:?}", feat);
 
     // This is kind of a pain, but as it turns out, different architectures can cause some things to behave in weird ways.  For example, `DWORD` might be a typedef on one arch, but a macro on another, which leads to a different expansion.  Hooray!
-    let feat = feat.and(feat_mask);
-    feat.check_valid();
+    let feat = match feat.and(feat_mask).check_valid() {
+        Ok(feat) => feat,
+        Err(err) => panic!(".. invalid feature set for {}: {}", decl_cur, err),
+    };
 
     match decl_kind {
         CK::InclusionDirective
@@ -461,10 +463,10 @@ impl ExpConfig {
         "--target=i686-pc-windows-gnu", "-D__X86__", "-D_M_IX86"
     ];
     const X86_64_SWITCHES: &'static [&'static str] = &[
-        "--target=x86_64-pc-windows-gnu" // "-D_WIN64", "-D_AMD64_", "-D__x86_64", "-D__x86_64__", "-D_M_AMD64", "_M_X64"
+        "--target=x86_64-pc-windows-gnu", "-D_AMD64_", "-D_M_AMD64" // "-D_WIN64", "-D__x86_64", "-D__x86_64__", "_M_X64"
     ];
     const ARM_SWITCHES: &'static [&'static str] = &[
-        "--target=arm-pc-windows-gnu" // "-D__arm__", "-D_ARM_", "-D_M_ARM"
+        "--target=arm-pc-windows-gnu", "-D_ARM_", "-D_M_ARM" // "-D__arm__"
     ];
 
     fn switches(&self) -> Vec<String> {

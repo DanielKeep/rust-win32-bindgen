@@ -15,16 +15,17 @@ pub struct Features {
 }
 
 impl Features {
-    pub fn check_valid(&self) {
+    pub fn check_valid(self) -> Result<Features, &'static str> {
         if let Some(ref parts) = self.parts {
-            assert!(parts.is_any(), "cannot have empty partition set");
+            if !parts.is_any() { return Err("cannot have empty partition set"); }
         }
         if let Some(ref winver) = self.winver {
-            assert!(winver.is_any(), "cannot have empty winver set");
+            if !winver.is_any() { return Err("cannot have empty winver set"); }
         }
         if let Some(ref arch) = self.arch {
-            assert!(arch.is_any(), "cannot have empty architecture set");
+            if !arch.is_any() { return Err("cannot have empty architecture set"); }
         }
+        Ok(self)
     }
 
     pub fn complement(self) -> Features {
@@ -369,6 +370,17 @@ impl From<WinVersion> for WinVersions {
         match v.next_version() {
             Some(n) => WinVersions(vec![(v as u32)..(n as u32)]),
             None => WinVersions(vec![(v as u32)..!0])
+        }
+    }
+}
+
+impl From<Range<Option<WinVersion>>> for WinVersions {
+    fn from(v: Range<Option<WinVersion>>) -> WinVersions {
+        match (v.start, v.end) {
+            (None, None) => (..).into(),
+            (Some(a), None) => (a..).into(),
+            (None, Some(b)) => (..b).into(),
+            (Some(a), Some(b)) => (a..b).into()
         }
     }
 }
