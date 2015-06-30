@@ -1,3 +1,12 @@
+/**
+Contains everything relating to the feature set abstraction.
+
+Feature sets are used to work out under what conditions something should exist.  Currently, this is based on three things:
+
+1. API Partitions (Desktop, Metro, Phone).
+2. Windows Versions.
+3. Architectures.
+*/
 use std::fmt;
 use clang;
 
@@ -12,6 +21,13 @@ pub use self::parts::Partitions;
 pub use self::scan::scan_features;
 pub use self::winvers::WinVersions;
 
+/**
+Combines the various parts of a feature set into one glorious whole.
+
+The major reason for this is how `None` is handled.  `None` is *not* the same as "everything" or "nothing".  The problem is that it's often necessary to compute the complement of a feature set.  For example, `!X86_32` should be `(X86_64|Arm)`; without ignoring `None`s, we'd *also* end up excluding all versions of windows and all partitions!
+
+**Note**: There are `From` implementations for each of the component feature set types.
+*/
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Features {
     pub parts: Option<Partitions>,
@@ -20,6 +36,11 @@ pub struct Features {
 }
 
 impl Features {
+    /**
+    Determines whether a feature set is "valid", and returns it in a `Result`.
+
+    This is primarily to check for cases where one or more parts of the feature set exclude *everything*.  This shouldn't *ever* happen, and is an excellent sign that something has gone horribly wrong somewhere.
+    */
     pub fn check_valid(self) -> Result<Features, &'static str> {
         if let Some(ref parts) = self.parts {
             if !parts.is_any() { return Err("cannot have empty partition set"); }
@@ -33,6 +54,7 @@ impl Features {
         Ok(self)
     }
 
+    /// Compute the complement of this feature set.
     pub fn complement(self) -> Features {
         Features {
             parts: { debug!(".. parts..."); self.parts.map(|p| !p) },
@@ -41,6 +63,7 @@ impl Features {
         }
     }
 
+    /// Compute the intersection of two feature sets.
     pub fn and(self, other: Features) -> Features {
         Features {
             parts: match (self.parts, other.parts) {
@@ -61,6 +84,7 @@ impl Features {
         }
     }
 
+    /// Compute the union of two feature sets.
     pub fn or(self, other: Features) -> Features {
         Features {
             parts: match (self.parts, other.parts) {
@@ -128,10 +152,18 @@ impl From<Architectures> for Features {
     }
 }
 
+/// Determines whether any of the given tokens are "important".
 pub fn has_important_defines(toks: &[String]) -> bool {
     toks.iter().any(|tok| is_important_define(&**tok))
 }
 
+/**
+Determines whether this token, interpreted as an identifier, is "important".
+
+The practical definition of "important" is: any identifier whose presence *forces* us to correctly parse and evaluate a conditional compilation expression.
+
+In other words, anything that could affect a feature set.
+*/
 pub fn is_important_define(tok: &str) -> bool {
     match tok {
         // Architecture defines
@@ -173,6 +205,9 @@ pub fn is_important_define(tok: &str) -> bool {
     }
 }
 
+/**
+Given an identifier, work out the feature set it represents.
+*/
 pub fn define_feature(name: &str) -> Features {
     debug!("define_feature({:?})", name);
     match cc::Node::eval_defined(name) {
@@ -186,6 +221,9 @@ pub fn define_feature(name: &str) -> Features {
     }
 }
 
+/**
+Given a conditional compilation expression, work out the feature set it represents.
+*/
 pub fn define_feature_expr(toks: &[String], loc: &clang::SourceLocation) -> Features {
     debug!("define_feature_expr({:?}, {})", toks, loc.display_short());
     if !has_important_defines(toks) {

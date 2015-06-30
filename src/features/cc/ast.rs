@@ -1,30 +1,74 @@
-use ::WinVersion;
+/*!
+Defines the AST for conditional compilation expressions.
+*/
+use WinVersion;
 use features::{Architectures, Partitions, is_important_define};
 use super::eval::Value;
 
+/**
+A single node in a CC expression AST.
+*/
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Node {
+    /// An integer literal.
     IntLit(u32),
+
+    /// An identifier.
     Ident(String),
+
+    /// A `defined(_)` or `defined _` expression.
     Defined(Box<Node>),
+
+    /// A `! _` expression.
     Not(Box<Node>),
+
+    /// A `_ && _` expression.
     And(Box<Node>, Box<Node>),
+
+    /// A `_ || _` expression.
     Or(Box<Node>, Box<Node>),
+
+    /// A `_ == _` expression.
     Eq(Box<Node>, Box<Node>),
+
+    /// A `_ != _` expression.
     Ne(Box<Node>, Box<Node>),
+
+    /// A `_ < _` expression.
     Lt(Box<Node>, Box<Node>),
+
+    /// A `_ <= _` expression.
     Le(Box<Node>, Box<Node>),
+
+    /// A `_ > _` expression.
     Gt(Box<Node>, Box<Node>),
+
+    /// A `_ >= _` expression.
     Ge(Box<Node>, Box<Node>),
+
+    /// A `_ >> _` expression.
     Rs(Box<Node>, Box<Node>),
+
+    /// A `OSVER( _ )` expression.
     OsVer(Box<Node>),
+
+    /// A `SPVER( _ )` expression.
     SpVer(Box<Node>),
+
+    /// A `WINAPI_FAMILY_PARTITION( _ )` expression.
     Part(Box<Node>),
+
+    /// A `_( _ )` expression.
     Invoke(Box<Node>, Box<Node>),
+
+    /// An ignored expression.
     Ignore,
 }
 
 impl Node {
+    /**
+    Evaluates an AST node.
+    */
     pub fn eval(&self) -> Result<Value, String> {
         use self::Node::*;
         match *self {
@@ -103,6 +147,9 @@ impl Node {
             | "WINVER"
             => return Ok(Value::Ignore),
 
+            /*
+            We want this because in at least one case, this being not-defined causes an architecture test to be ignored.
+            */
             "_CONTRACT_GEN"
             => return Ok(Value::Bool(false)),
 
@@ -120,6 +167,9 @@ impl Node {
         Ok(Value::Ignore)
     }
 
+    /**
+    This effectively just ensures that the given value is a partition value, and immediately converts it into a full feature set.
+    */
     fn eval_partition(value: Value) -> Result<Value, String> {
         use super::eval::Value::*;
         match value {
@@ -128,6 +178,9 @@ impl Node {
         }
     }
 
+    /**
+    Simplifies this node into an identifier, or fails if it can't.
+    */
     fn simplify_to_ident(&self) -> Result<String, String> {
         use self::Node::*;
         match *self {

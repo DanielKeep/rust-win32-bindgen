@@ -1,9 +1,19 @@
+/*!
+All macros in the library should be in, or a descendant of, this module.
+
+The exception are macros with limited or very specific use (like those in `features::cc::parse`).
+*/
 #[macro_use] pub mod bitflags;
 
 macro_rules! as_item {
     ($($i:item)*) => ($($i)*);
 }
 
+/**
+Used with enums with no payloads, where every variant has a value.
+
+Generates some extra conversion `impl`s automatically.
+*/
 macro_rules! c_enum {
     (
         $(#[$attrs:meta])*
@@ -36,6 +46,9 @@ macro_rules! c_enum {
     };
 }
 
+/**
+A (crappy) shortcut to defining an extension trait for exactly one type.
+*/
 macro_rules! ext_impl {
     (
         $impl_ty:ty as $trait_ident:ident {
@@ -54,6 +67,9 @@ macro_rules! ext_impl {
     };
 }
 
+/**
+Shorthand for implementing `Display`.
+*/
 macro_rules! impl_Display {
     (for $t:ty, ($self_:ident, $fmt:ident) $body:block) => {
         impl ::std::fmt::Display for $t {

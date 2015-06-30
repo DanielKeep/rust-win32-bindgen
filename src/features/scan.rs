@@ -1,7 +1,15 @@
+/**
+Deals with processing a translation unit's tokens to extract a feature set map.
+
+This is mostly in its own module to make it easier to exclude from logging.
+*/
 use std::collections::BTreeMap;
 use clang;
 use super::{Features, define_feature, define_feature_expr};
 
+/**
+This function will, given a list of token lints, compute a sparse feature set map.
+*/
 pub fn scan_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {
     debug!("scan_features([..; {}])", tls.len());
     /*

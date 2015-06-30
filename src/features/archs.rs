@@ -1,19 +1,27 @@
+/*!
+Defines the Architectures feature set component.
+*/
 use std::fmt;
 
 bitflags! {
+    /**
+    A bit vector of all possible target architectures.
+    */
+    #[allow(dead_code)]
     flags Architectures: u8 {
         const None      = 0b000,
         const All       = 0b111,
+        const Bits64    = 0b010,
+        const X86_All   = 0b011,
+
         const X86_32    = 0b001,
         const X86_64    = 0b010,
-        const X86_All   = 0b011,
         const Arm       = 0b100,
-
-        const Bits64    = 0b010,
     }
 }
 
 impl Architectures {
+    /// Work out if the given identifier maps to a supported architecture.
     pub fn from_define(s: &str) -> Option<Architectures> {
         match s {
             "_X86_"
@@ -37,6 +45,7 @@ impl Architectures {
             "WIN64" | "_WIN64" | "__WIN64" | "__WIN64__"
             => Some(Architectures::Bits64),
 
+            // These *are* architectures... we just don't support them.
             "_M_MRX000"
             | "_M_ALPHA"
             | "_M_PPC"

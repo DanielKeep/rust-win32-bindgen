@@ -1,3 +1,8 @@
+/**
+This module contains the bulk of the header-processing code, and the core structures.
+
+Note that it specifically *does not* contain conditional expression handling, or feature set abstractions.
+*/
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use itertools::Itertools;
@@ -11,29 +16,9 @@ use clang::{
 use features::{Features, scan_features};
 use util;
 
-struct Cache<'a> {
-    tu: TuCache<'a>,
-    features: HashMap<String, BTreeMap<u32, Features>>,
-}
-
-impl<'a> Cache<'a> {
-    fn new(index: Rc<Index>, gen_config: &'a GenConfig) -> Self {
-        Cache {
-            tu: TuCache::new(index, gen_config),
-            features: HashMap::new(),
-        }
-    }
-
-    fn iter_features<F>(&mut self, mut f: F)
-    where F: FnMut(&str, u32, &Features) {
-        for (&ref name, &ref map) in self.features.iter() {
-            for (&line, &ref feat) in map.iter() {
-                f(name, line, feat);
-            }
-        }
-    }
-}
-
+/**
+This is effectively the "entry point" for processing.  Given a header and a configuration, it attempts to generate a Rust binding.
+*/
 pub fn process_header(path: &str, gen_config: &GenConfig) {
     let index = Index::create(
         /*exclude_declarations_from_pch*/ false,
@@ -43,6 +28,7 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     let mut output = Output::new();
     let mut cache = Cache::new(index, gen_config);
 
+    // Expand once for each expansion config.
     for exp_config in &gen_config.exp_configs {
         info!("expanding with config {:?}", exp_config);
         info!(".. switches: {:?}", exp_config.switches());
@@ -133,6 +119,9 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     }
 }
 
+/**
+Processes a single declaration.
+*/
 fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv, output: &mut Output, cache: &mut Cache) {
     use clang::CursorKind as CK;
 
@@ -156,10 +145,19 @@ fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv
 
     debug!(".. process_decl feat: {:?}", feat);
 
-    // This is kind of a pain, but as it turns out, different architectures can cause some things to behave in weird ways.  For example, `DWORD` might be a typedef on one arch, but a macro on another, which leads to a different expansion.  Hooray!
+    /*
+    This is kind of a pain, but as it turns out, different architectures can cause some things to behave in weird ways.  For example, `DWORD` might be a typedef on one arch, but a macro on another, which leads to a different expansion.  Hooray!
+    */
     let feat = match feat.and(feat_mask).check_valid() {
         Ok(feat) => feat,
-        Err(err) => panic!(".. invalid feature set for {}: {}", decl_cur, err),
+        Err(err) => {
+            /*
+            This is *very definitely* a problem.  This means that the pre-processor has emitted code that our feature set says we shouldn't ever reach!
+
+            This generally means one of two things: either the feature set calculation is wrong *or* the set of pre-defined symbols is incomplete/incorrect.
+            */
+            panic!(".. invalid feature set for {}: {}", decl_cur, err)
+        },
     };
 
     match decl_kind {
@@ -173,6 +171,9 @@ fn process_decl(decl_cur: Cursor, feat_mask: Features, native_cc: NativeCallConv
     }
 }
 
+/**
+Process a single function declaration.
+*/
 fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, native_cc: NativeCallConv) {
     use clang::CallingConv as CC;
     use ::NativeCallConv as NCC;
@@ -199,6 +200,7 @@ fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, 
         }
     };
 
+    // Wrap this in a closure because I'm too lazy to do proper error handling right now.  Later, I promise.
     match (|| -> Result<(), String> {
         let name = decl_cur.spelling();
         let res_ty = if ty.result().kind() == clang::TypeKind::Void {
@@ -223,10 +225,18 @@ fn process_function_decl(decl_cur: Cursor, output: &mut Output, feat: Features, 
     }
 }
 
+/**
+Translate a type into an equivalent Rust type reference.
+
+Note that this **is not** for translating type declarations; you cannot just pass a structure definition.
+*/
 fn trans_type(ty: clang::Type) -> Result<String, String> {
     use clang::TypeKind as TK;
     debug!("trans_type({:?} {:?})", ty.kind(), ty.spelling());
 
+    /**
+    This works out the module qualifier for a given type.  This is intended to let you put types into files based on their source header.
+    */
     fn mod_qual(cur: &Cursor) -> String {
         let file = cur.location().file();
         match file.map(|f| f.name()) {
@@ -323,6 +333,9 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
     }
 }
 
+/**
+Calculate the feature set map for a given file.
+*/
 fn get_all_features<'a>(file: clang::File, cache: &'a mut Cache) -> &'a BTreeMap<u32, Features> {
     let path = file.file_name();
     let tu_cache = &mut cache.tu;
@@ -332,6 +345,9 @@ fn get_all_features<'a>(file: clang::File, cache: &'a mut Cache) -> &'a BTreeMap
     fmap
 }
 
+/**
+Calculate the feature set at a given line.
+*/
 fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features {
     use std::collections::Bound;
 
@@ -346,6 +362,9 @@ fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features 
         .unwrap_or_else(|| Features::default())
 }
 
+/**
+Returns a given file as a sequence of `(line_number, tokens)` pairs.
+*/
 fn get_token_lines(file: clang::File, tu_cache: &mut TuCache) -> Vec<(u32, Vec<clang::Token>)> {
     debug!("get_token_lines({:?}, _)", file.file_name());
     let path = file.file_name();
@@ -379,8 +398,49 @@ fn get_token_lines(file: clang::File, tu_cache: &mut TuCache) -> Vec<(u32, Vec<c
     tu.tokenize().into_iter().group_by(remap_line_number).collect()
 }
 
+/**
+Bundles together any caches we need for efficiency.
+*/
+struct Cache<'a> {
+    /// Parsed Clang `TranslationUnit`s.
+    tu: TuCache<'a>,
+
+    /// Evaluated per-line feature sets.
+    features: HashMap<String, BTreeMap<u32, Features>>,
+}
+
+impl<'a> Cache<'a> {
+    fn new(index: Rc<Index>, gen_config: &'a GenConfig) -> Self {
+        Cache {
+            tu: TuCache::new(index, gen_config),
+            features: HashMap::new(),
+        }
+    }
+
+    /**
+    Iterates over all feature sets.
+
+    Note that this works by iterating over the underlying feature set maps.  What this gives you *in effect* is the evaluated feature set of *every* conditional compilation branch.
+    */
+    fn iter_features<F>(&mut self, mut f: F)
+    where F: FnMut(&str, u32, &Features) {
+        for (&ref name, &ref map) in self.features.iter() {
+            for (&line, &ref feat) in map.iter() {
+                f(name, line, feat);
+            }
+        }
+    }
+}
+
+/**
+Used to centralise how output is done.
+
+One of the major reasons for this is to consolidate disparate bindings.  That is, if the output for both x86 and x86-64 are the same, then they should use a *single* declaration with an appropriate `#[cfg]` attribute.
+
+Note that `annot` is used for "annotations", which are free-form strings that may be emitted as comments in the output.  These are handy for identifying, for example, *where* a declaration originally came from, for debugging purposes.
+*/
 struct Output {
-    // [name => [(feat, cconv, annot, decl)]]
+    /// `[name => [(feat, cconv, decl, annot)]]`
     fn_decls: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
 }
 
@@ -391,6 +451,11 @@ impl Output {
         }
     }
 
+    /**
+    Adds a function declaration.
+
+    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
+    */
     fn add_func_decl(&mut self, name: String, feat: Features, cconv: AbsCallConv, decl: String, annot: String) {
         use std::mem::replace;
         debug!("add_func_decl({:?}, {:?}, {:?}, {:?}, {:?})", name, feat, cconv, decl, annot);
@@ -402,9 +467,7 @@ impl Output {
             if *dd == decl && *dcc == cconv {
                 debug!(".. merging");
                 // The decls are the same.  Just combine the feature sets together.
-                debug!(".. old feats: {:?}, {:?}", df, feat);
                 let new_df = replace(df, Features::default()).or(feat);
-                debug!(".. new feats: {:?}", new_df);
                 *df = new_df;
                 da.push_str(", ");
                 da.push_str(&annot);
@@ -418,6 +481,13 @@ impl Output {
     }
 }
 
+/**
+An "abstract" calling convention.
+
+This is to answer the question: "if a function uses the C calling convention, is that the same thing as `"system"`, or do I have to *actually* say `"C"`?"
+
+Without this, almost every Windows API call would need two decls: one with `extern "C"`, and one with `extern "stdcall"`.  Yuck.
+*/
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum AbsCallConv {
     ExplicitlyC,
@@ -425,6 +495,7 @@ enum AbsCallConv {
 }
 
 impl AbsCallConv {
+    /// Gets the calling convention as a string, suitable for use with Rust's `extern`.
     fn as_str(self) -> &'static str {
         use self::AbsCallConv::*;
         match self {
@@ -434,6 +505,9 @@ impl AbsCallConv {
     }
 }
 
+/**
+A `TranslationUnit` cache.
+*/
 pub struct TuCache<'a> {
     index: Rc<Index>,
     cache: HashMap<TuCacheKey, Rc<TranslationUnit>>,
@@ -449,6 +523,11 @@ impl<'a> TuCache<'a> {
         }
     }
 
+    /**
+    Parse a translation unit with the given expansion config.
+
+    Unsurprisingly, this will return a cached TU if one has already been parsed.
+    */
     pub fn parse_translation_unit(
         &mut self,
         path: &str,
@@ -482,6 +561,9 @@ impl<'a> TuCache<'a> {
     }
 }
 
+/**
+This is the unique key for each entry in the `TuCache`.
+*/
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TuCacheKey(String, ExpConfig);
 

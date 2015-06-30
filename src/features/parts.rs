@@ -1,6 +1,15 @@
+/*!
+Defines the Partitions feature set component.
+*/
 use std::fmt;
 
 bitflags! {
+    /**
+    Partitions are the way the Windows API is divided into different subsets.
+
+    In *theory*, these could all be disjoint, but, at least for now, `App` forms a strict subset of `Desktop`, and `Phone` doesn't appear to have *anything* in it at all.
+    */
+    #[allow(dead_code)]
     flags Partitions: u8 {
         const All           = 0b111,
         const Desktop       = 0b001,
@@ -11,6 +20,7 @@ bitflags! {
 }
 
 impl Partitions {
+    /// Work out if the given identifier maps to a known partition.
     pub fn from_define(s: &str) -> Option<Partitions> {
         match s {
             "WINAPI_PARTITION_DESKTOP"  => Some(Partitions::Desktop),
@@ -22,9 +32,9 @@ impl Partitions {
     }
 }
 
-pub const CFG_FEATURE_PARTITION_DESKTOP: &'static str = "winapi_desktop";
-pub const CFG_FEATURE_PARTITION_APP: &'static str = "winapi_app";
-pub const CFG_FEATURE_PARTITION_PHONE: &'static str = "winapi_phone";
+const CFG_FEATURE_PARTITION_DESKTOP: &'static str = "winapi_desktop";
+const CFG_FEATURE_PARTITION_APP: &'static str = "winapi_app";
+const CFG_FEATURE_PARTITION_PHONE: &'static str = "winapi_phone";
 
 impl fmt::Display for Partitions {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {

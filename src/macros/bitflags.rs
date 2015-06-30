@@ -1,3 +1,8 @@
+/*!
+A modified version of the common `bitflags!` macro.
+
+Specifically, the constants are *associated* constants now, because they're neat.
+*/
 // Copyright 2014 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.

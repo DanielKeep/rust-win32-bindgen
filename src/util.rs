@@ -1,3 +1,6 @@
+/*!
+Miscellaneous utility code.
+*/
 use std::ffi::CString;
 use std::fs;
 use std::io;
@@ -55,6 +58,7 @@ pub trait PathBufExt {
 
 impl PathBufExt for PathBuf {
     fn normalize_path_sep(&mut self) {
+        // TODO: also resolve to some sort of absolute path.
         let s = ::std::mem::replace(self, PathBuf::new())
             .into_os_string()
             .into_string().unwrap_or_else(|oss| oss.to_string_lossy().into_owned());
@@ -69,6 +73,11 @@ impl PathBufExt for PathBuf {
     }
 }
 
+/**
+This is because I am too lazy to write my own damn monad type.
+
+This makes a `Result<Option<T>, E>` behave exactly like `Option<T>`, except that errors will always short-circuit.
+*/
 pub trait ResultOptionExt<T, E> {
     fn ro_or_else<F>(self, f: F) -> Result<Option<T>, E>
     where F: FnOnce() -> Result<Option<T>, E>;

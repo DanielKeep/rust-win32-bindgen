@@ -1,8 +1,16 @@
+/*!
+Contains the conditional compilation expression parser.
+*/
 use std::fmt::Debug;
 use regex::Regex;
 use super::ast::Node;
 use util::ResultOptionExt;
 
+/**
+Shorthand for matching a sequence of tokens.
+
+You might wonder why this is used so little for being so much code.  Answer: a lot of it got removed because it was hateful.  :P
+*/
 macro_rules! match_toks {
     (
         $toks:expr,
@@ -41,6 +49,15 @@ macro_rules! match_toks {
     };
 }
 
+/**
+Guards against attempting to parse an empty list of tokens.
+
+This is a problem because `Ok(None)` will continue to try `ro_or_else` branches.
+
+The *correct* solution to this, would, of course, to have been to define a proper monad with a distinct "out of input, give up" short-circuit variant... but I'm too lazy.
+
+Just ensure that `parse_guard!(toks)` is at the start of every `parse_*` function and you'll be fine.
+*/
 macro_rules! parse_guard {
     ($toks:expr) => {
         if $toks.len() == 0 { return Ok(None); }
@@ -53,6 +70,7 @@ lazy_static! {
     static ref RE_IDENT_LITERAL: Regex = Regex::new(r#"^([A-Za-z_][A-Za-z0-9_]*)$"#).unwrap();
 }
 
+/// Shorthand for the parse result type.
 pub type ParseResult<'a, S> = Result<Option<(Node, &'a [S])>, String>;
 
 // http://www.nongnu.org/hcb/#conditional-expression

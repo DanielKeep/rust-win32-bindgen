@@ -1,3 +1,10 @@
+/*!
+The build script has two primary jobs:
+
+1. Do code generation.  Currently, this consists of turning `data/winver.json` into an appropriate `enum`.
+
+2. Tell Cargo to link against Clang.
+*/
 extern crate itertools;
 extern crate serde;
 
@@ -8,6 +15,7 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use itertools::Itertools;
 
+/// `pj` as in "path join".
 macro_rules! pj {
     ($p0:expr, $($ps:expr),*) => {
         {
@@ -123,7 +131,6 @@ impl WinVersion {{
     }}
 }}
 "#,
-        // primary_variants = primary.iter().map(|(k, v)| format!("    {} = 0x{:08x},", k, v)).join("\n"),
         primary_variants = vers.iter().cloned()
             .map(|v| format!("    {:<8} = 0x{:08x},", reverse[&v], v))
             .join("\n"),

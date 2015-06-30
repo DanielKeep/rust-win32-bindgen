@@ -1,24 +1,40 @@
+/*!
+Defines the `WinVersions` feature set component.
+*/
 use std::fmt;
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use itertools::Itertools;
 use WinVersion;
 
+/**
+This represents a set of Windows versions.
+
+It's a vector of ranges because these things *can* be kinda fragmented.
+
+In this context, `u32`s are used to represent "full" (*i.e.* `NTDDI_VERSION`) version values.  We do not use the `WinVersion` enum directly because I'm too lazy.  Seriously; imagine how much worse the code below would be if I had to constantly deal with a fucking Rust enum.  Urgh.
+*/
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WinVersions(Vec<Range<u32>>);
 
 impl WinVersions {
+    /// Returns `true` if this set contains *any* versions.
     pub fn is_any(&self) -> bool {
         &*self.0 != [0..0]
     }
 
+    /**
+    Returns `true` if this set can be represented by a single `>=` conditional.
+    */
     pub fn is_simple(&self) -> bool {
         !self.is_any() || (self.0.len() == 1 && self.0[0].end == !0)
     }
 
+    /// Returns a borrowed slice of the underlying numerical ranges.
     pub fn ranges(&self) -> &[Range<u32>] {
         &self.0
     }
 
+    /// Computes the complement of this set.
     pub fn complement(self) -> WinVersions {
         debug!("WinVersions::complement({:?})", self);
         if &*self.0 == &[0..!0] {
@@ -54,6 +70,7 @@ impl WinVersions {
         WinVersions(ranges)
     }
 
+    /// Computes the intersection of two sets.
     pub fn intersect(self, other: WinVersions) -> WinVersions {
         let mut abs = &self.0[..];
         let mut ijs = &other.0[..];
@@ -107,6 +124,7 @@ impl WinVersions {
         WinVersions(acc).simplify()
     }
 
+    /// Computes the union of two sets.
     pub fn union(mut self, mut other: WinVersions) -> WinVersions {
         fn inner(mut acc: Vec<Range<u32>>, abs: &mut [Range<u32>], ijs: &mut [Range<u32>]) -> Vec<Range<u32>> {
             if abs.len() == 0 || ijs.len() == 0 {
@@ -181,6 +199,7 @@ impl WinVersions {
         WinVersions(ranges).simplify()
     }
 
+    /// Simplifies a set, joining abutting ranges together.
     fn simplify(self) -> Self {
         let mut pts: Vec<_> = self.0.into_iter().flat_map(|ab| vec![ab.start, ab.end].into_iter()).collect();
         pts.dedup();
@@ -193,7 +212,7 @@ impl WinVersions {
     }
 }
 
-pub const CFG_FEATURE_VERSION_PREFIX: &'static str = "winapi_ver_";
+const CFG_FEATURE_VERSION_PREFIX: &'static str = "winapi_ver_";
 
 impl fmt::Display for WinVersions {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
