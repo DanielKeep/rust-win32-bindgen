@@ -255,6 +255,8 @@ where Defer: FnMut(Cursor)
         => unreachable!(),
 
         CK::StructDecl => process_struct_decl(decl_cur, output, feat, defer),
+        CK::UnionDecl => process_union_decl(decl_cur, output, feat, defer),
+        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
         CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat),
 
@@ -286,8 +288,6 @@ where Defer: FnMut(Cursor)
     debug!("process_struct_decl({}, ..)", decl_cur);
 
     let name = try!(name_for_maybe_anon(&decl_cur));
-    assert!(name != "");
-
     let annot = decl_cur.location().display_short().to_string();
 
     match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
@@ -318,7 +318,15 @@ where Defer: FnMut(Cursor)
 
             CK::FieldDecl => {
                 let name = child_cur.spelling();
-                let ty = try!(trans_type(child_cur.type_()));
+                let ty = match trans_type(child_cur.type_()) {
+                    Ok(ty) => ty,
+                    Err(err) => {
+                        // TODO: just stub for now.
+                        let decl = format!("{{feat}}#[repr(C)] pub struct {}; /* ERR STUB! */", name);
+                        output.add_struct_decl(name, feat, decl, annot);
+                        return Err(err);
+                    }
+                };
                 fields.push(format!("{}: {}", name, ty));
             },
 
@@ -342,6 +350,56 @@ where Defer: FnMut(Cursor)
             fields = fields.connect(", "),
         )
     };
+
+    output.add_struct_decl(name, feat, decl, annot);
+    Ok(())
+}
+
+/**
+Process a single union declaration.
+*/
+fn process_union_decl<Defer>(
+    decl_cur: Cursor,
+    output: &mut Output,
+    feat: Features,
+    _defer: &mut Defer,
+) -> Result<(), String>
+where Defer: FnMut(Cursor)
+{
+    debug!("process_union_decl({}, ..)", decl_cur);
+
+    let name = try!(name_for_maybe_anon(&decl_cur));
+    let annot = decl_cur.location().display_short().to_string();
+
+    let decl = format!(
+        "{{feat}}#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
+        name = name,
+    );
+
+    output.add_struct_decl(name, feat, decl, annot);
+    Ok(())
+}
+
+/**
+Process a single enum declaration.
+*/
+fn process_enum_decl<Defer>(
+    decl_cur: Cursor,
+    output: &mut Output,
+    feat: Features,
+    _defer: &mut Defer,
+) -> Result<(), String>
+where Defer: FnMut(Cursor)
+{
+    debug!("process_enum_decl({}, ..)", decl_cur);
+
+    let name = try!(name_for_maybe_anon(&decl_cur));
+    let annot = decl_cur.location().display_short().to_string();
+
+    let decl = format!(
+        "{{feat}}#[repr(C)] pub enum {name}; /* STUB! */",
+        name = name,
+    );
 
     output.add_struct_decl(name, feat, decl, annot);
     Ok(())
