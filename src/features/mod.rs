@@ -175,6 +175,14 @@ impl WinVersions {
         &*self.0 != [0..0]
     }
 
+    pub fn is_simple(&self) -> bool {
+        !self.is_any() || (self.0.len() == 1 && self.0[0].end == !0)
+    }
+
+    pub fn ranges(&self) -> &[Range<u32>] {
+        &self.0
+    }
+
     pub fn complement(self) -> WinVersions {
         debug!("WinVersions::complement({:?})", self);
         if &*self.0 == &[0..!0] {
@@ -185,7 +193,8 @@ impl WinVersions {
             return WinVersions(vec![0..!0]);
         }
 
-        let pts: Vec<_> = self.0.into_iter().flat_map(|ab| vec![ab.start, ab.end].into_iter()).collect();
+        let mut pts: Vec<_> = self.0.into_iter().flat_map(|ab| vec![ab.start, ab.end].into_iter()).collect();
+        pts.dedup();
         debug!(".. pts: {:?}", pts);
 
         let pts: Vec<_> = match (pts[0] == 0, pts[pts.len()-1] == !0) {
@@ -259,7 +268,7 @@ impl WinVersions {
             }
         }
 
-        WinVersions(acc)
+        WinVersions(acc).simplify()
     }
 
     pub fn union(mut self, mut other: WinVersions) -> WinVersions {
@@ -333,6 +342,17 @@ impl WinVersions {
             ranges.push(0..0);
         }
 
+        WinVersions(ranges).simplify()
+    }
+
+    fn simplify(self) -> Self {
+        let mut pts: Vec<_> = self.0.into_iter().flat_map(|ab| vec![ab.start, ab.end].into_iter()).collect();
+        pts.dedup();
+        let ranges = pts.iter().cloned()
+            .batching(|mut it| it.next().and_then(
+                |a| it.next().map(
+                    |b| a..b)))
+            .collect();
         WinVersions(ranges)
     }
 }

@@ -45,6 +45,15 @@ impl<'a> Cache<'a> {
             features: HashMap::new(),
         }
     }
+
+    fn iter_features<F>(&mut self, mut f: F)
+    where F: FnMut(&str, u32, &Features) {
+        for (&ref name, &ref map) in self.features.iter() {
+            for (&line, &ref feat) in map.iter() {
+                f(name, line, feat);
+            }
+        }
+    }
 }
 
 pub fn process_header(path: &str, gen_config: &GenConfig) {
@@ -93,6 +102,54 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
             decl_set.sort();
             for decl in decl_set {
                 println!("{}", decl);
+            }
+        }
+    }
+
+    info!("sanity-checking features...");
+    {
+        use std::collections::BTreeSet;
+
+        let mut weird_vers = BTreeSet::new();
+
+        cache.iter_features(|path, line, &ref feat| {
+            use features::Partitions;
+
+            /*
+            What we're looking for are any features that might mess up the expansion.  This currently means:
+
+            - Features with upper limits on versions.
+            - Features that *do not* target the desktop.
+            */
+
+            let mut suspect = vec![];
+
+            if let Some(ref parts) = feat.parts {
+                if (parts.clone() & Partitions::DesktopApp).is_empty() {
+                    suspect.push("non-desktop-app");
+                }
+            }
+
+            if let Some(ref winver) = feat.winver {
+                if !winver.is_simple() {
+                    for &ref range in winver.ranges() {
+                        weird_vers.insert(range.end);
+                    }
+                    suspect.push("complex-winver");
+                }
+            }
+
+            if suspect.len() != 0 {
+                warn!("suspect feature set: {}:{}: {} {:?}",
+                    path, line, suspect.connect(", "), feat);
+            }
+        });
+
+        if weird_vers.len() > 0 {
+            warn!("suspect versions:");
+            for ver in weird_vers {
+                warn!(".. 0x{:08x} - {:?}",
+                    ver, generated::winver::WinVersion::from_u32_round_up(ver));
             }
         }
     }
@@ -288,18 +345,21 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
     }
 }
 
+fn get_all_features<'a>(file: clang::File, cache: &'a mut Cache) -> &'a std::collections::BTreeMap<u32, Features> {
+    let path = file.file_name();
+    let tu_cache = &mut cache.tu;
+    let fmap = cache.features.entry(path.clone()).or_insert_with(||
+        get_features(get_token_lines(file, tu_cache)));
+
+    fmap
+}
+
 fn get_features_at(file: clang::File, line: u32, cache: &mut Cache) -> Features {
     use std::collections::Bound;
 
     debug!("get_features_at({:?}, {}, _)", file.file_name(), line);
-    let path = file.file_name();
 
-    let tu_cache = &mut cache.tu;
-
-    let fmap = cache.features.entry(path.clone()).or_insert_with(||
-        get_features(get_token_lines(file, tu_cache))
-    );
-
+    let fmap = get_all_features(file, cache);
     fmap.range(Bound::Unbounded, Bound::Included(&line)).next_back()
         .map(|(i, v)| {
             debug!(".. found: {}: {:?}", i, v);
@@ -445,7 +505,7 @@ impl Architecture {
     }
 }
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ExpConfig {
     pub arch: Architecture,
     pub winver: (u16, u32),
@@ -567,7 +627,7 @@ impl Output {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum AbsCallConv {
     ExplicitlyC,
     System,
@@ -583,7 +643,7 @@ impl AbsCallConv {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum NativeCallConv {
     C,
     Stdcall,
@@ -635,17 +695,25 @@ impl<'a> TuCache<'a> {
         self.cache.insert(key, tu.clone());
         Ok(tu)
     }
+
+    // pub fn iter_dummy_tus(&self) -> Vec<Rc<TranslationUnit>> {
+    //     fn filter(&(&ref k, _): &(&TuCacheKey, &Rc<TranslationUnit>)) -> bool {
+    //         k.1 == ExpConfig::DUMMY_CFG
+    //     }
+
+    //     fn map((_, &ref v): (&TuCacheKey, &Rc<TranslationUnit>)) -> Rc<TranslationUnit> {
+    //         v.clone()
+    //     }
+
+    //     self.cache.iter().filter(filter).map(map).collect()
+    // }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct TuCacheKey(String, u64);
+pub struct TuCacheKey(String, ExpConfig);
 
 impl TuCacheKey {
     pub fn new(path: &str, exp_config: &ExpConfig) -> TuCacheKey {
-        use std::hash::{self, Hash, Hasher};
-        let mut hasher = hash::SipHasher::default();
-        exp_config.hash(&mut hasher);
-        let config_hash = hasher.finish();
-        TuCacheKey(path.into(), config_hash)
+        TuCacheKey(path.into(), exp_config.clone())
     }
 }

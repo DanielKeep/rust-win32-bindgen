@@ -635,6 +635,7 @@ impl_Display! {
     }
 }
 
+#[derive(Clone)]
 pub struct File(Rc<TranslationUnit>, ll::CXFile);
 
 impl File {
