@@ -274,7 +274,7 @@ where Defer: FnMut(Cursor)
         (false, true) => {
             // There *is no* definition!
             info!(".. no definition found");
-            let decl = format!("#[repr(C)] pub struct {};", name);
+            let decl = format!("{{feat}}#[repr(C)] pub struct {};", name);
             output.add_struct_decl(name, feat, decl, annot);
             return Ok(())
         },
@@ -309,11 +309,11 @@ where Defer: FnMut(Cursor)
     let decl = match fields.len() {
         // Why did this have to be special-cased? :(
         0 => format!(
-            "#[repr(C)] pub struct {name};",
+            "{{feat}}#[repr(C)] pub struct {name};",
             name = name,
         ),
         _ => format!(
-            "#[repr(C)] pub struct {name} {{ {fields} }}",
+            "{{feat}}#[repr(C)] pub struct {name} {{ {fields} }}",
             name = name,
             fields = fields.connect(", "),
         )
