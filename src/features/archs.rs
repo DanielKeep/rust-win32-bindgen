@@ -7,12 +7,9 @@ bitflags! {
     /**
     A bit vector of all possible target architectures.
     */
-    #[allow(dead_code)]
     flags Architectures: u8 {
         const None      = 0b000,
-        const All       = 0b111,
         const Bits64    = 0b010,
-        const X86_All   = 0b011,
 
         const X86_32    = 0b001,
         const X86_64    = 0b010,

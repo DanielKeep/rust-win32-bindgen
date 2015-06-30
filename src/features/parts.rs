@@ -9,9 +9,7 @@ bitflags! {
 
     In *theory*, these could all be disjoint, but, at least for now, `App` forms a strict subset of `Desktop`, and `Phone` doesn't appear to have *anything* in it at all.
     */
-    #[allow(dead_code)]
     flags Partitions: u8 {
-        const All           = 0b111,
         const Desktop       = 0b001,
         const App           = 0b010,
         const DesktopApp    = 0b011,
