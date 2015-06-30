@@ -24,7 +24,7 @@ use regex::Regex;
 
 use clang::{
     Index, RcIndexExt,
-    TranslationUnit, RcTranslationUnitExt, TranslationUnitFlags,
+    TranslationUnit, TranslationUnitFlags,
     Cursor, CursorKind,
 };
 
@@ -398,7 +398,7 @@ fn get_token_lines(file: clang::File, tu_cache: &mut TuCache) -> Vec<(u32, Vec<c
     };
 
     // Grab all the tokens, then re-group them by logical line.
-    tu.tokenize_all_to_vec().into_iter().group_by(remap_line_number).collect()
+    tu.tokenize().into_iter().group_by(remap_line_number).collect()
 }
 
 fn get_features(tls: Vec<(u32, Vec<clang::Token>)>) -> BTreeMap<u32, Features> {

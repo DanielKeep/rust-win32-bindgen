@@ -149,26 +149,11 @@ impl TranslationUnit {
             }
         }
     }
-}
 
-ext_impl! { Rc<TranslationUnit> as RcTranslationUnitExt {
-    fn tokenize_all_to_vec[](&self) -> Vec<Token> {
-        unsafe {
-            debug!("tokenize_all_to_vec({:?})", self);
-            let cursor = self.cursor();
-            let range = ll::clang_getCursorExtent(cursor.1);
-            let mut toks_ptr = ::std::ptr::null_mut();
-            let mut toks_len = 0;
-            ll::clang_tokenize(self.1, range, &mut toks_ptr, &mut toks_len);
-            let toks_slice = ::std::slice::from_raw_parts(toks_ptr, toks_len as usize);
-            let toks: Vec<_> = toks_slice.iter().map(|tok| Token::from_ll(self.clone(), *tok)).collect();
-            drop(toks_slice);
-            ll::clang_disposeTokens(self.1, toks_ptr, toks_len);
-            debug!(".. toks: [..; {}]", toks.len());
-            toks
-        }
+    pub fn tokenize(&self) -> Tokens {
+        self.cursor().tokenize()
     }
-}}
+}
 
 impl Drop for TranslationUnit {
     fn drop(&mut self) {
@@ -197,9 +182,6 @@ pub struct IndexAction(pub ll::CXIndexAction);
 impl IndexAction {
     fn create(_cidx: &Index) -> IndexAction {
         panic!("nyi: have to handle lifetime management");
-        // IndexAction(unsafe {
-        //     ll::clang_IndexAction_create(cidx.0)
-        // })
     }
 }
 
@@ -252,6 +234,73 @@ impl TryFrom<libc::c_uint> for ErrorCode {
     }
 }
 
+pub struct Tokens {
+    tu: Rc<TranslationUnit>, 
+    unsafe_ptr: *mut ll::CXToken,
+    unsafe_len: u32,
+}
+
+impl Tokens {
+    unsafe fn from_ll(tu: Rc<TranslationUnit>, ptr: *mut ll::CXToken, len: u32) -> Tokens {
+        assert!(!ptr.is_null());
+        Tokens {
+            tu: tu,
+            unsafe_ptr: ptr,
+            unsafe_len: len,
+        }
+    }
+
+    fn as_slice_ll(&self) -> &[ll::CXToken] {
+        unsafe {
+            ::std::slice::from_raw_parts(self.unsafe_ptr, self.unsafe_len as usize)
+        }
+    }
+
+    pub fn at(&self, index: usize) -> Token {
+        Token::from_ll(self.tu.clone(), self.as_slice_ll()[index])
+    }
+
+    pub fn len(&self) -> usize {
+        self.unsafe_len as usize
+    }
+}
+
+impl Drop for Tokens {
+    fn drop(&mut self) {
+        unsafe {
+            ll::clang_disposeTokens(self.tu.1, self.unsafe_ptr, self.unsafe_len)
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Tokens {
+    type Item = Token;
+    type IntoIter = TokensIter<'a>;
+
+    fn into_iter(self) -> TokensIter<'a> {
+        TokensIter {
+            tokens: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct TokensIter<'a> {
+    tokens: &'a Tokens,
+    index: u32,
+}
+
+impl<'a> Iterator for TokensIter<'a> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Token> {
+        if self.index as usize >= self.tokens.len() { return None; }
+        let r = self.tokens.at(self.index as usize);
+        self.index += 1;
+        Some(r)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Cursor(pub Rc<TranslationUnit>, pub ll::CXCursor);
 
@@ -291,6 +340,16 @@ impl Cursor {
     pub fn spelling(&self) -> String {
         unsafe {
             cxstring_to_string(ll::clang_getCursorSpelling(self.1))
+        }
+    }
+
+    pub fn tokenize(&self) -> Tokens {
+        unsafe {
+            let range = ll::clang_getCursorExtent(self.1);
+            let mut toks_ptr = ::std::ptr::null_mut();
+            let mut toks_len = 0;
+            ll::clang_tokenize((self.0).1, range, &mut toks_ptr, &mut toks_len);
+            Tokens::from_ll(self.0.clone(), toks_ptr, toks_len)
         }
     }
 
