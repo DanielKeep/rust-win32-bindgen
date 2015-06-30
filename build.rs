@@ -37,8 +37,7 @@ fn main() {
 }
 
 fn make_gen_dir() -> PathBuf {
-    let manifest_path = get_manifest_dir();
-    let gen_path = pj!(manifest_path, "src", "generated");
+    let gen_path = pj!(get_out_dir(), "src");
     let _ = fs::create_dir(&gen_path).ok();
     gen_path
 }
@@ -180,6 +179,10 @@ where P: AsRef<Path> + ::std::fmt::Debug {
 
 fn get_manifest_dir() -> PathBuf {
     env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()).into()
+}
+
+fn get_out_dir() -> PathBuf {
+    env::var("OUT_DIR").ok().expect("OUT_DIR *must* be set").into()
 }
 
 fn get_target() -> PathBuf {
