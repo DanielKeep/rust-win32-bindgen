@@ -280,23 +280,32 @@ fn output_header_items(items: &OutputItems, output: &mut OutputFiles) {
     }
     lines.sort();
 
-    for (header, _, feat, decl, annot) in lines {
-        output.emit_to_header(header, feat, decl, annot);
+    let lines = lines.into_iter()
+        .group_by_lazy(|&(header, _, feat, _, _)| (header, feat));
+
+    for ((header, feat), group) in &lines {
+        for (_, _, _, decl, annot) in group {
+            output.emit_to_header(header, feat, decl, annot);
+        }
     }
 }
 
 fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_config: &OutConfig) {
     let mut lines = vec![];
     for (name, decls) in &items.fn_items {
-        for &(idx, ref feat, ref cconv, ref decl, ref annot) in decls {
-            lines.push((idx, name, feat, cconv, decl, annot));
+        for &(_, ref feat, ref cconv, ref decl, ref annot) in decls {
+            for &ref lib in out_config.get_fn_libs(name) {
+                lines.push((lib, feat, name, cconv, decl, annot));
+            }
         }
     }
     lines.sort();
 
-    for (_, name, feat, cconv, decl, annot) in lines {
-        let libs = out_config.get_fn_libs(name);
-        for &ref lib in libs {
+    let lines = lines.into_iter()
+        .group_by_lazy(|&(lib, feat, _, cconv, _, _)| (lib, feat, cconv));
+
+    for ((lib, feat, cconv), group) in &lines {
+        for (_, _, _, _, decl, annot) in group {
             output.emit_to_library(lib, feat, cconv, decl, annot);
         }
     }
@@ -952,8 +961,10 @@ impl OutputItems {
                 // The decls are the same.  Just combine the feature sets together.
                 let new_df = replace(df, Features::default()).or(feat);
                 *df = new_df;
-                da.push_str(", ");
-                da.push_str(&annot);
+                if *da != annot {
+                    da.push_str(", ");
+                    da.push_str(&annot);
+                }
                 return;
             }
         }
@@ -1000,7 +1011,7 @@ This cache owns the output files and saves us from constantly opening and closin
 */
 struct OutputFiles<'a> {
     out_config: &'a OutConfig,
-    files: HashMap<path::PathBuf, fs::File>,
+    files: HashMap<path::PathBuf, (fs::File, Option<(Features, AbsCallConv)>)>,
 }
 
 impl<'a> OutputFiles<'a> {
@@ -1013,21 +1024,37 @@ impl<'a> OutputFiles<'a> {
 
     fn emit_to_header(&mut self, name: &str, feat: &Features, decl: &str, annot: &str) {
         use std::io::prelude::*;
-        let file = self.get_file(name, &self.out_config.header_path);
+        let (file, _) = self.get_file(name, &self.out_config.header_path);
         writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
     }
 
     fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: &AbsCallConv, decl: &str, annot: &str) {
         use std::io::prelude::*;
-        let file = self.get_file(name, &self.out_config.library_path);
-        writeln!(file, "{}extern {:?} {{ {} /* {} */ }}", feat, cconv.as_str(), decl, annot).unwrap();
+        let (file, group) = self.get_file(name, &self.out_config.library_path);
+        match *group {
+            Some((ref gf, ref gcc)) if gf == feat && gcc == cconv => (),
+            Some(_) => {
+                writeln!(file, "}}\n{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
+            },
+            None => {
+                writeln!(file, "{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
+            }
+        }
+        writeln!(file, "    {} /* {} */", decl, annot).unwrap();
+        *group = Some((feat.clone(), cconv.clone()));
     }
 
-    fn get_file<'b>(&'b mut self, name: &str, pattern: &str) -> &'b mut fs::File {
+    fn get_file<'b>(
+        &'b mut self,
+        name: &str,
+        pattern: &str
+    ) -> (&'b mut fs::File, &'b mut Option<(Features, AbsCallConv)>) {
         use std::path::PathBuf;
         let mut path = PathBuf::from(&self.out_config.output_dir);
         path.push(pattern.replace("{}", name));
-        self.files.entry(path.clone()).or_insert_with(|| fs::File::create(path).unwrap())
+        let fg = self.files.entry(path.clone())
+            .or_insert_with(|| (fs::File::create(path).unwrap(), None));
+        (&mut fg.0, &mut fg.1)
     }
 }
 
