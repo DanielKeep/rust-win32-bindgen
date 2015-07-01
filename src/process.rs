@@ -16,6 +16,8 @@ use clang::{
 use features::{Features, scan_features};
 use util;
 
+const EMIT_STUBS: bool = false;
+
 /**
 This is effectively the "entry point" for processing.  Given a header and a configuration, it attempts to generate a Rust binding.
 */
@@ -321,9 +323,11 @@ where Defer: FnMut(Cursor)
                 let ty = match trans_type(child_cur.type_()) {
                     Ok(ty) => ty,
                     Err(err) => {
-                        // TODO: just stub for now.
-                        let decl = format!("{{feat}}#[repr(C)] pub struct {}; /* ERR STUB! */", name);
-                        output.add_struct_decl(name, feat, decl, annot);
+                        if EMIT_STUBS {
+                            // TODO: just stub for now.
+                            let decl = format!("{{feat}}#[repr(C)] pub struct {}; /* ERR STUB! */", name);
+                            output.add_struct_decl(name, feat, decl, annot);
+                        }
                         return Err(err);
                     }
                 };
@@ -371,12 +375,14 @@ where Defer: FnMut(Cursor)
     let name = try!(name_for_maybe_anon(&decl_cur));
     let annot = decl_cur.location().display_short().to_string();
 
-    let decl = format!(
-        "{{feat}}#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
-        name = name,
-    );
+    if EMIT_STUBS {
+        let decl = format!(
+            "{{feat}}#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
+            name = name,
+        );
 
-    output.add_struct_decl(name, feat, decl, annot);
+        output.add_struct_decl(name, feat, decl, annot);
+    }
     Ok(())
 }
 
@@ -396,12 +402,14 @@ where Defer: FnMut(Cursor)
     let name = try!(name_for_maybe_anon(&decl_cur));
     let annot = decl_cur.location().display_short().to_string();
 
-    let decl = format!(
-        "{{feat}}#[repr(C)] pub enum {name}; /* STUB! */",
-        name = name,
-    );
+    if EMIT_STUBS {
+        let decl = format!(
+            "{{feat}}#[repr(C)] pub enum {name}; /* STUB! */",
+            name = name,
+        );
 
-    output.add_struct_decl(name, feat, decl, annot);
+        output.add_struct_decl(name, feat, decl, annot);
+    }
     Ok(())
 }
 
