@@ -261,6 +261,7 @@ where Defer: FnMut(Cursor)
         CK::EnumDecl => process_enum_decl(decl_cur, output, feat, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
         CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat),
+        CK::MacroDefinition => process_macro_defn(decl_cur, output, feat),
 
         kind => {
             warn!("could-not-translate unsupported {:?} {} at {}",
@@ -497,6 +498,24 @@ fn process_typedef_decl(decl_cur: Cursor, output: &mut Output, feat: Features) -
 
     let annot = decl_cur.location().display_short().to_string();
     output.add_typedef_decl(name, feat, decl, annot);
+    Ok(())
+}
+
+/**
+Process a single macro definition.
+*/
+fn process_macro_defn(defn_cur: Cursor, _output: &mut Output, _feat: Features) -> Result<(), String> {
+    debug!("process_macro_defn({}, ..)", defn_cur);
+
+    let name = defn_cur.spelling();
+    let _annot = defn_cur.location().display_short().to_string();
+    let mut toks: Vec<_> = defn_cur.tokenize().into_iter().skip(1).map(|t| t.spelling()).collect();
+    toks.pop(); // Drop last because it's just a newline.
+
+    if EMIT_STUBS {
+        println!("// #define {} {:?}", name, toks);
+    }
+
     Ok(())
 }
 
