@@ -250,7 +250,10 @@ fn process_decls(
     let mut deferred_iter = None;
 
     while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
-        if gen_config.should_ignore(&decl_cur) {
+        /*
+        Something to be aware of: a symbol might match the ignore patterns, but have been renamed to something that *doesn't*.  We need to check for this.
+        */
+        if gen_config.should_ignore(&decl_cur) && !renames.is_renamed(&decl_cur) {
             debug!("ignoring: {}", decl_cur);
         } else if renames.is_invalidated(&decl_cur) {
             debug!("invalidated: {}", decl_cur);
@@ -271,13 +274,13 @@ fn process_decls(
 fn output_header_items(items: &OutputItems, output: &mut OutputFiles) {
     let mut lines = vec![];
     for (_, decls) in &items.header_items {
-        for &(ref header, ref feat, ref decl, ref annot) in decls {
-            lines.push((header, feat, decl, annot));
+        for &(idx, ref header, ref feat, ref decl, ref annot) in decls {
+            lines.push((header, idx, feat, decl, annot));
         }
     }
     lines.sort();
 
-    for (header, feat, decl, annot) in lines {
+    for (header, _, feat, decl, annot) in lines {
         output.emit_to_header(header, feat, decl, annot);
     }
 }
@@ -285,13 +288,13 @@ fn output_header_items(items: &OutputItems, output: &mut OutputFiles) {
 fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_config: &OutConfig) {
     let mut lines = vec![];
     for (name, decls) in &items.fn_items {
-        for &(ref feat, ref cconv, ref decl, ref annot) in decls {
-            lines.push((name, feat, cconv, decl, annot));
+        for &(idx, ref feat, ref cconv, ref decl, ref annot) in decls {
+            lines.push((idx, name, feat, cconv, decl, annot));
         }
     }
     lines.sort();
 
-    for (name, feat, cconv, decl, annot) in lines {
+    for (_, name, feat, cconv, decl, annot) in lines {
         let libs = out_config.get_fn_libs(name);
         for &ref lib in libs {
             output.emit_to_library(lib, feat, cconv, decl, annot);
@@ -913,16 +916,19 @@ One of the major reasons for this is to consolidate disparate bindings.  That is
 Note that `annot` is used for "annotations", which are free-form strings that may be emitted as comments in the output.  These are handy for identifying, for example, *where* a declaration originally came from, for debugging purposes.
 */
 struct OutputItems {
+    next_seq_id: u64,
+
     /// `[name => [(feat, cconv, decl, annot)]]`
-    fn_items: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
+    fn_items: HashMap<String, Vec<(u64, Features, AbsCallConv, String, String)>>,
 
     /// `[name => [(header, feat, decl, annot)]]`
-    header_items: HashMap<String, Vec<(String, Features, String, String)>>,
+    header_items: HashMap<String, Vec<(u64, String, Features, String, String)>>,
 }
 
 impl OutputItems {
     fn new() -> Self {
         OutputItems {
+            next_seq_id: 0,
             fn_items: HashMap::new(),
             header_items: HashMap::new(),
         }
@@ -940,7 +946,7 @@ impl OutputItems {
         let decls = self.fn_items.entry(name).or_insert(vec![]);
 
         // Is there already a decl which is compatible with this one?
-        for &mut (ref mut df, ref dcc, ref dd, ref mut da) in decls.iter_mut() {
+        for &mut (_, ref mut df, ref dcc, ref dd, ref mut da) in decls.iter_mut() {
             if *dd == decl && *dcc == cconv {
                 debug!(".. merging");
                 // The decls are the same.  Just combine the feature sets together.
@@ -954,7 +960,8 @@ impl OutputItems {
 
         // Add it to the set of decls.
         debug!(".. adding");
-        decls.push((feat, cconv, decl, annot));
+        decls.push((self.next_seq_id, feat, cconv, decl, annot));
+        self.next_seq_id += 1;
     }
 
     /**
@@ -969,7 +976,7 @@ impl OutputItems {
         let decls = self.header_items.entry(name).or_insert(vec![]);
 
         // Is there already a decl which is compatible with this one?
-        for &mut (ref dh, ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+        for &mut (_, ref dh, ref mut df, ref dd, ref mut da) in decls.iter_mut() {
             if *dh == header && *dd == decl {
                 debug!(".. merging");
                 // The decls are the same.  Just combine the feature sets together.
@@ -983,7 +990,8 @@ impl OutputItems {
 
         // Add it to the set of decls.
         debug!(".. adding");
-        decls.push((header, feat, decl, annot));
+        decls.push((self.next_seq_id, header, feat, decl, annot));
+        self.next_seq_id += 1;
     }
 }
 
