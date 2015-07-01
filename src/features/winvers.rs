@@ -2,6 +2,7 @@
 Defines the `WinVersions` feature set component.
 */
 use std::fmt;
+use std::cmp::{Ord, Ordering, PartialOrd};
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 use itertools::Itertools;
 use WinVersion;
@@ -209,6 +210,20 @@ impl WinVersions {
                     |b| a..b)))
             .collect();
         WinVersions(ranges)
+    }
+}
+
+impl Ord for WinVersions {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl PartialOrd for WinVersions {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let lhs: Vec<_> = self.0.iter().map(|r| (r.start, r.end)).collect();
+        let rhs: Vec<_> = other.0.iter().map(|r| (r.start, r.end)).collect();
+        lhs.partial_cmp(&rhs)
     }
 }
 

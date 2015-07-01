@@ -21,6 +21,7 @@ extern crate libc;
 extern crate num;
 extern crate regex;
 
+use std::collections::HashMap;
 use regex::Regex;
 use features::Features;
 
@@ -215,6 +216,50 @@ impl GenConfig {
         if self.ignore_file_paths.iter().any(|r| r.is_match(&file)) { return true; }
 
         false
+    }
+}
+
+/**
+Collects output settings.
+*/
+pub struct OutConfig {
+    /**
+    Base directory where output should be written.
+    */
+    pub output_dir: String,
+
+    /**
+    Format string for "header" (*i.e.* non-function items) output files.
+
+    `{}` will be replaced with the name of the output file (sans extension).
+
+    **Example**: `"headers/{}.rs"`
+    */
+    pub header_path: String,
+
+    /**
+    Format string for "library" (*i.e.* function items) output files.
+
+    `{}` will be replaced with the name of the output file (sans extension).
+
+    **Example**: `"libraries/{}.rs"`
+    */
+    pub library_path: String,
+
+    /**
+    This determines which libraries function declarations are emitted for.  A single file declaration may be emitted to more than one library.
+    */
+    pub function_library_map: HashMap<String, Vec<String>>,
+
+    /**
+    If a function is not listed in `function_library_map`, this determines the fallback location(s).
+    */
+    pub function_library_fallbacks: Vec<String>,
+}
+
+impl OutConfig {
+    fn get_fn_libs<'a>(&'a self, name: &str) -> &'a [String] {
+        self.function_library_map.get(name).unwrap_or(&self.function_library_fallbacks)
     }
 }
 

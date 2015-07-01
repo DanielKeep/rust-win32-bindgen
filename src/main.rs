@@ -4,106 +4,22 @@ extern crate env_logger;
 extern crate regex;
 extern crate win32_bindgen;
 
-use win32_bindgen::{Architecture, ExpConfig, GenConfig, NativeCallConv};
-
-pub const USE_MINGW_HEADERS: bool = false;
-pub const USE_MSVC_HEADERS: bool = false;
+use std::collections::HashMap;
+use win32_bindgen as bg;
 
 fn main() {
     env_logger::init().unwrap();
-    let result = if USE_MINGW_HEADERS {
-        try_main_mingw()
-    } else if USE_MSVC_HEADERS {
-        try_main_msvc()
-    } else {
-        try_main_json()
-    };
+    let result = try_main();
     result.unwrap();
 }
 
-const EXP_CONFIGS: &'static [ExpConfig] = &[
-    ExpConfig {
-        arch: Architecture::X86_32,
-        winver: ExpConfig::WINVER_WIN81,
-        native_cc: NativeCallConv::Stdcall,
-    },
-    ExpConfig {
-        arch: Architecture::X86_64,
-        winver: ExpConfig::WINVER_WIN81,
-        native_cc: NativeCallConv::C,
-    },
-    ExpConfig {
-        arch: Architecture::Arm,
-        winver: ExpConfig::WINVER_WIN81,
-        native_cc: NativeCallConv::C,
-    },
-];
-
-fn try_main_json() -> Result<(), String> {
+fn try_main() -> Result<(), String> {
     info!("Running with local\\config.json...");
     let json_config: Config = rustc_serialize::json::decode(&read_file("local/config.json")).unwrap();
-    let header = json_config.header.clone();
-    let gen_config = json_config.into_gen_config();
-    win32_bindgen::process_header(&header, &gen_config);
-    Ok(())
-}
-
-fn try_main_mingw() -> Result<(), String> {
-    info!("Running with MinGW headers...");
-    let gen_config = GenConfig {
-        exp_configs: EXP_CONFIGS.iter().cloned().collect(),
-        ignore_decl_spellings: vec![re("^_"), re("__")],
-        ignore_file_paths: vec![
-            re(r#"^$"#),
-            re(r#"\\_mingw.h"#), re(r#"\\_mingw_secapi.h"#),
-            re(r#"\\sdks\\_mingw_directx.h"#), re(r#"\\sdks\\_mingw_ddk.h"#),
-            re(r#"\\psdk_inc\\intrin-impl.h"#),
-            re(r#"\\ctype.h"#), re(r#"\\excpt.h"#), re(r#"\\string.h"#),
-            re(r#"\\sec_api\\string_s.h"#),
-            re(r#"\\winapifamily.h"#), re(r#"\\apiset.h"#),
-            re(r#"\\sal.h"#), re(r#"\\specstrings.h"#),
-        ],
-        switches: vec![
-        ],
-        non_canonical_tag_names: vec![
-            re("^tag[A-Z_]"),
-        ],
-    };
-
-    win32_bindgen::process_header(
-        // r#"F:\Programs\MSYS2-64\mingw32\i686-w64-mingw32\include\windows.h"#,
-        r#"F:\Programs\MSYS2-64\mingw32\i686-w64-mingw32\include\winnt.h"#,
-        &gen_config
-    );
-    Ok(())
-}
-
-fn try_main_msvc() -> Result<(), String> {
-    info!("Running with Windows SDK headers...");
-    let gen_config = GenConfig {
-        exp_configs: EXP_CONFIGS.iter().cloned().collect(),
-        ignore_decl_spellings: vec![re("^_"), re("__")],
-        ignore_file_paths: vec![
-            re(r#"^$"#),
-            // The sanity checks are a pain to parse.
-            re(r#"\\sdkddkver.h"#),
-        ],
-        switches: vec![
-            r#"-fms-extensions"#.into(), r#"-fms-compatibility"#.into(),
-            r#"-D_MSC_VER=1800"#.into(),
-            r#"-D_STDCALL_SUPPORTED"#.into(),
-            r#"-Ilocal/Include/shared"#.into(),
-            r#"-Ilocal/Include/um"#.into(),
-        ],
-        non_canonical_tag_names: vec![
-            re("^tag[A-Z_]"),
-        ],
-    };
-
-    win32_bindgen::process_header(
-        r#"local\Include\um\winnt.h"#,
-        &gen_config
-    );
+    let header = json_config.header;
+    let gen_config = json_config.generation.into_gen_config();
+    let out_config = json_config.output.into_out_config();
+    bg::process_header(&header, &gen_config, &out_config);
     Ok(())
 }
 
@@ -114,17 +30,23 @@ fn re(re: &str) -> regex::Regex {
 #[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
 pub struct Config {
     pub header: String,
-    pub expansion_configs: Vec<ExpansionConfig>,
+    pub generation: GenConfig,
+    pub output: OutConfig,
+}
+
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+pub struct GenConfig {
+    pub expansion_configs: Vec<ExpConfig>,
     pub ignore_decl_spellings: Vec<String>,
     pub ignore_file_paths: Vec<String>,
     pub switches: Vec<String>,
     pub non_canonical_tag_names: Vec<String>,
 }
 
-impl Config {
-    pub fn into_gen_config(self) -> GenConfig {
-        GenConfig {
-            exp_configs: self.expansion_configs.into_iter().map(ExpansionConfig::into_exp_config).collect(),
+impl GenConfig {
+    pub fn into_gen_config(self) -> bg::GenConfig {
+        bg::GenConfig {
+            exp_configs: self.expansion_configs.into_iter().map(ExpConfig::into_exp_config).collect(),
             ignore_decl_spellings: self.ignore_decl_spellings.into_iter().map(|s| re(&s)).collect(),
             ignore_file_paths: self.ignore_file_paths.into_iter().map(|s| re(&s)).collect(),
             switches: self.switches,
@@ -134,16 +56,37 @@ impl Config {
 }
 
 #[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
-pub struct ExpansionConfig {
-    pub architecture: ConfigArch,
-    pub windows_version_short: String,
-    pub windows_version_full: String,
-    pub native_calling_conv: ConfigNCC,
+pub struct OutConfig {
+    pub output_dir: String,
+    pub header_path: String,
+    pub library_path: String,
+    pub function_library_map: String,
+    pub function_library_fallback: String,
 }
 
-impl ExpansionConfig {
-    pub fn into_exp_config(self) -> ExpConfig {
-        ExpConfig {
+impl OutConfig {
+    pub fn into_out_config(self) -> bg::OutConfig {
+        bg::OutConfig {
+            output_dir: self.output_dir,
+            header_path: self.header_path,
+            library_path: self.library_path,
+            function_library_map: read_symbol_list(&self.function_library_map),
+            function_library_fallbacks: vec![self.function_library_fallback],
+        }
+    }
+}
+
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+pub struct ExpConfig {
+    pub architecture: Architecture,
+    pub windows_version_short: String,
+    pub windows_version_full: String,
+    pub native_calling_conv: NativeCallConv,
+}
+
+impl ExpConfig {
+    pub fn into_exp_config(self) -> bg::ExpConfig {
+        bg::ExpConfig {
             arch: self.architecture.into_architecture(),
             winver: ((wv(&self.windows_version_short) >> 16) as u16, wv(&self.windows_version_full)),
             native_cc: self.native_calling_conv.into_native_call_conv(),
@@ -152,42 +95,63 @@ impl ExpansionConfig {
 }
 
 fn wv(s: &str) -> u32 {
-    win32_bindgen::WinVersion::from_name(s).unwrap() as u32
+    bg::WinVersion::from_name(s).unwrap() as u32
 }
 
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
-pub enum ConfigArch {
+pub enum Architecture {
     X86_32,
     X86_64,
     Arm,
 }
 
-impl ConfigArch {
-    pub fn into_architecture(self) -> Architecture {
-        use self::ConfigArch::*;
+impl Architecture {
+    pub fn into_architecture(self) -> bg::Architecture {
+        use self::Architecture::*;
         match self {
-            X86_32 => Architecture::X86_32,
-            X86_64 => Architecture::X86_64,
-            Arm => Architecture::Arm,
+            X86_32 => bg::Architecture::X86_32,
+            X86_64 => bg::Architecture::X86_64,
+            Arm => bg::Architecture::Arm,
         }
     }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, RustcDecodable, RustcEncodable)]
-pub enum ConfigNCC {
+pub enum NativeCallConv {
     C,
     Stdcall,
 }
 
-impl ConfigNCC {
-    pub fn into_native_call_conv(self) -> NativeCallConv {
-        use self::ConfigNCC::*;
+impl NativeCallConv {
+    pub fn into_native_call_conv(self) -> bg::NativeCallConv {
+        use self::NativeCallConv::*;
         match self {
-            C => NativeCallConv::C,
-            Stdcall => NativeCallConv::Stdcall,
+            C => bg::NativeCallConv::C,
+            Stdcall => bg::NativeCallConv::Stdcall,
         }
     }
+}
+
+pub fn read_symbol_list(path: &str) -> HashMap<String, Vec<String>> {
+    use std::fs;
+    use std::io;
+    use std::io::prelude::*;
+    let mut map = HashMap::new();
+    for line in io::BufReader::new(fs::File::open(path).unwrap()).lines() {
+        let line = line.unwrap();
+        let line = line.trim();
+        if line.len() == 0 || line.starts_with("#") { continue; }
+
+        let mut parts = line.splitn(2, ":");
+        let sym_name = parts.next().unwrap();
+        let sym_libs = parts.next().unwrap();
+
+        let sym_libs = sym_libs.split_whitespace().map(|s| s.into()).collect();
+
+        map.insert(sym_name.into(), sym_libs);
+    }
+    map
 }
 
 pub fn read_file(path: &str) -> String {

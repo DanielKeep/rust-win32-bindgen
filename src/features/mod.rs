@@ -28,7 +28,7 @@ The major reason for this is how `None` is handled.  `None` is *not* the same as
 
 **Note**: There are `From` implementations for each of the component feature set types.
 */
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Features {
     pub parts: Option<Partitions>,
     pub winver: Option<WinVersions>,

@@ -4,9 +4,11 @@ This module contains the bulk of the header-processing code, and the core struct
 Note that it specifically *does not* contain conditional expression handling, or feature set abstractions.
 */
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
+use std::path;
 use std::rc::Rc;
 use itertools::Itertools;
-use {ExpConfig, GenConfig, NativeCallConv, WinVersion};
+use {ExpConfig, GenConfig, NativeCallConv, OutConfig, WinVersion};
 use clang::{
     self,
     Index, RcIndexExt,
@@ -21,7 +23,7 @@ const EMIT_STUBS: bool = false;
 /**
 This is effectively the "entry point" for processing.  Given a header and a configuration, it attempts to generate a Rust binding.
 */
-pub fn process_header(path: &str, gen_config: &GenConfig) {
+pub fn process_header(path: &str, gen_config: &GenConfig, out_config: &OutConfig) {
     info!("using clang version {}", clang::version());
 
     let index = Index::create(
@@ -29,7 +31,7 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
         /*display_diagnostics*/ false,
     );
 
-    let mut output = Output::new();
+    let mut out_items = OutputItems::new();
     let mut cache = Cache::new(index, gen_config);
 
     // Expand once for each expansion config.
@@ -38,13 +40,13 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
         info!(".. switches: {:?}", exp_config.switches());
         let tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse TU");
         let renames = scan_for_renames(tu.clone(), gen_config);
-        process_decls(tu, gen_config, exp_config, &mut output, &mut cache, &renames);
+        process_decls(tu, gen_config, exp_config, &mut out_items, &mut cache, &renames);
     }
 
     info!("generating output...");
-    output_typedef_decls(&output);
-    output_struct_decls(&output);
-    output_func_decls(&output);
+    let out_files = &mut OutputFiles::new(out_config);
+    output_header_items(&out_items, out_files);
+    output_func_items(&out_items, out_files, out_config);
 
     info!("sanity-checking features...");
     sanity_check_features(&mut cache);
@@ -174,7 +176,7 @@ where Defer: FnMut(Cursor) {
         _ => return None
     }
 
-    info!("scan_decl_for_rename({}, ..)", decl_cur);
+    debug!("scan_decl_for_rename({}, ..)", decl_cur);
 
     let ty = decl_cur.typedef_decl_underlying_type();
 
@@ -237,7 +239,7 @@ fn process_decls(
     tu: Rc<TranslationUnit>,
     gen_config: &GenConfig,
     exp_config: &ExpConfig,
-    output: &mut Output,
+    output: &mut OutputItems,
     cache: &mut Cache,
     renames: &Renames,
 ) {
@@ -266,75 +268,33 @@ fn process_decls(
     }
 }
 
-fn output_typedef_decls(output: &Output) {
-    let typedef_decls = &output.typedef_decls;
-    let mut names: Vec<_> = typedef_decls.keys().collect();
-    names.sort();
+fn output_header_items(items: &OutputItems, output: &mut OutputFiles) {
+    let mut lines = vec![];
+    for (_, decls) in &items.header_items {
+        for &(ref header, ref feat, ref decl, ref annot) in decls {
+            lines.push((header, feat, decl, annot));
+        }
+    }
+    lines.sort();
 
-    for (name, &ref decls) in names.into_iter().map(|k| (k, &typedef_decls[k])) {
-        let mut decl_set = vec![];
-        for &(ref feat, ref decl, ref annot) in decls {
-            debug!(".. {} ({}): {:?}", name, annot, feat);
-            decl_set.push(format!("{decl} /* {annot} */",
-                annot = annot,
-                decl = decl.replace(
-                    "{feat}",
-                    &format!("{:<33}", feat.to_string())
-                )
-            ));
-        }
-        decl_set.sort();
-        for decl in decl_set {
-            println!("{}", decl);
-        }
+    for (header, feat, decl, annot) in lines {
+        output.emit_to_header(header, feat, decl, annot);
     }
 }
 
-fn output_struct_decls(output: &Output) {
-    let struct_decls = &output.struct_decls;
-    let mut names: Vec<_> = struct_decls.keys().collect();
-    names.sort();
-
-    for (name, &ref decls) in names.into_iter().map(|k| (k, &struct_decls[k])) {
-        let mut decl_set = vec![];
-        for &(ref feat, ref decl, ref annot) in decls {
-            debug!(".. {} ({}): {:?}", name, annot, feat);
-            decl_set.push(format!("{decl} /* {annot} */",
-                annot = annot,
-                decl = decl.replace(
-                    "{feat}",
-                    &format!("{:<33}", feat.to_string())
-                )
-            ));
-        }
-        decl_set.sort();
-        for decl in decl_set {
-            println!("{}", decl);
+fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_config: &OutConfig) {
+    let mut lines = vec![];
+    for (name, decls) in &items.fn_items {
+        for &(ref feat, ref cconv, ref decl, ref annot) in decls {
+            lines.push((name, feat, cconv, decl, annot));
         }
     }
-}
+    lines.sort();
 
-fn output_func_decls(output: &Output) {
-    let fn_decls = &output.fn_decls;
-    let mut names: Vec<_> = fn_decls.keys().collect();
-    names.sort();
-
-    for (name, &ref decls) in names.into_iter().map(|k| (k, &fn_decls[k])) {
-        let mut decl_set = vec![];
-        for &(ref feat, ref cc, ref decl, ref annot) in decls {
-            debug!(".. {} ({}): {:?}", name, annot, feat);
-            decl_set.push(format!("{extern_:<15} {{ {decl} }} /* {annot} */",
-                extern_ = format!("extern {:?}", cc.as_str()),
-                annot = annot,
-                decl = decl.replace(
-                    "{feat}",
-                    &format!("{:<33}", feat.to_string())
-                )
-            ));
-        }
-        decl_set.sort();
-        for decl in decl_set {
-            println!("{}", decl);
+    for (name, feat, cconv, decl, annot) in lines {
+        let libs = out_config.get_fn_libs(name);
+        for &ref lib in libs {
+            output.emit_to_library(lib, feat, cconv, decl, annot);
         }
     }
 }
@@ -393,7 +353,7 @@ fn process_decl<Defer>(
     decl_cur: Cursor,
     feat_mask: Features,
     native_cc: NativeCallConv,
-    output: &mut Output,
+    output: &mut OutputItems,
     cache: &mut Cache,
     renames: &Renames,
     defer: &mut Defer,
@@ -463,12 +423,16 @@ where Defer: FnMut(Cursor)
     }
 }
 
+fn file_stem(cur: &Cursor) -> String {
+    cur.location().file().expect("valid file for file_stem").name()
+}
+
 /**
 Process a single structure declaration.
 */
 fn process_struct_decl<Defer>(
     decl_cur: Cursor,
-    output: &mut Output,
+    output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
     defer: &mut Defer,
@@ -479,25 +443,25 @@ where Defer: FnMut(Cursor)
 
     debug!("process_struct_decl({}, ..)", decl_cur);
 
-    let name = match renames.rename_decl(&decl_cur) {
+    let (name, header) = match renames.rename_decl(&decl_cur) {
         Ok(cur) => {
             debug!(".. was renamed to {}", cur);
-            cur.spelling()
+            (cur.spelling(), file_stem(&cur))
         },
-        Err(cur) => try!(name_for_maybe_anon(&cur))
+        Err(cur) => (try!(name_for_maybe_anon(&cur)), file_stem(&cur))
     };
     let annot = decl_cur.location().display_short().to_string();
 
     match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
         (false, false) => {
-            info!(".. skipping forward declaration");
+            debug!(".. skipping forward declaration");
             return Ok(());
         },
         (false, true) => {
             // There *is no* definition!
-            info!(".. no definition found");
-            let decl = format!("{{feat}}#[repr(C)] pub struct {};", name);
-            output.add_struct_decl(name, feat, decl, annot);
+            debug!(".. no definition found");
+            let decl = format!("#[repr(C)] pub struct {};", name);
+            output.add_header_item(name, header, feat, decl, annot);
             return Ok(())
         },
         (true, _) => ()
@@ -521,8 +485,8 @@ where Defer: FnMut(Cursor)
                     Err(err) => {
                         if EMIT_STUBS {
                             // TODO: just stub for now.
-                            let decl = format!("{{feat}}#[repr(C)] pub struct {}; /* ERR STUB! */", name);
-                            output.add_struct_decl(name, feat, decl, annot);
+                            let decl = format!("#[repr(C)] pub struct {}; /* ERR STUB! */", name);
+                            output.add_header_item(name, header, feat, decl, annot);
                         }
                         return Err(err);
                     }
@@ -541,17 +505,17 @@ where Defer: FnMut(Cursor)
     let decl = match fields.len() {
         // Why did this have to be special-cased? :(
         0 => format!(
-            "{{feat}}#[repr(C)] pub struct {name};",
+            "#[repr(C)] pub struct {name};",
             name = name,
         ),
         _ => format!(
-            "{{feat}}#[repr(C)] pub struct {name} {{ {fields} }}",
+            "#[repr(C)] pub struct {name} {{ {fields} }}",
             name = name,
             fields = fields.connect(", "),
         )
     };
 
-    output.add_struct_decl(name, feat, decl, annot);
+    output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
 
@@ -560,7 +524,7 @@ Process a single union declaration.
 */
 fn process_union_decl<Defer>(
     decl_cur: Cursor,
-    output: &mut Output,
+    output: &mut OutputItems,
     feat: Features,
     _renames: &Renames,
     _defer: &mut Defer,
@@ -570,15 +534,16 @@ where Defer: FnMut(Cursor)
     debug!("process_union_decl({}, ..)", decl_cur);
 
     let name = try!(name_for_maybe_anon(&decl_cur));
+    let header = file_stem(&decl_cur);
     let annot = decl_cur.location().display_short().to_string();
 
     if EMIT_STUBS {
         let decl = format!(
-            "{{feat}}#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
+            "#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
             name = name,
         );
 
-        output.add_struct_decl(name, feat, decl, annot);
+        output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
 }
@@ -588,7 +553,7 @@ Process a single enum declaration.
 */
 fn process_enum_decl<Defer>(
     decl_cur: Cursor,
-    output: &mut Output,
+    output: &mut OutputItems,
     feat: Features,
     _renames: &Renames,
     _defer: &mut Defer,
@@ -598,15 +563,16 @@ where Defer: FnMut(Cursor)
     debug!("process_enum_decl({}, ..)", decl_cur);
 
     let name = try!(name_for_maybe_anon(&decl_cur));
+    let header = file_stem(&decl_cur);
     let annot = decl_cur.location().display_short().to_string();
 
     if EMIT_STUBS {
         let decl = format!(
-            "{{feat}}#[repr(C)] pub enum {name}; /* STUB! */",
+            "#[repr(C)] pub enum {name}; /* STUB! */",
             name = name,
         );
 
-        output.add_struct_decl(name, feat, decl, annot);
+        output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
 }
@@ -631,7 +597,7 @@ Process a single function declaration.
 */
 fn process_function_decl(
     decl_cur: Cursor,
-    output: &mut Output,
+    output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
     native_cc: NativeCallConv
@@ -671,14 +637,14 @@ fn process_function_decl(
     let arg_tys = arg_tys.connect(", ");
 
     let decl = format!(
-        r#"{{feat}}pub fn {name}({arg_tys}){res_ty};"#,
+        r#"pub fn {name}({arg_tys}){res_ty};"#,
         name = name,
         arg_tys = arg_tys,
         res_ty = res_ty,
     );
 
     let annot = decl_cur.location().display_short().to_string();
-    output.add_func_decl(name, feat, cconv, decl, annot);
+    output.add_func_item(name, feat, cconv, decl, annot);
     Ok(())
 }
 
@@ -687,27 +653,28 @@ Process a single structure declaration.
 */
 fn process_typedef_decl(
     decl_cur: Cursor,
-    output: &mut Output,
+    output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
 ) -> Result<(), String> {
     debug!("process_typedef_decl({}, ..)", decl_cur);
     let name = decl_cur.spelling();
+    let header = file_stem(&decl_cur);
 
     let ty = decl_cur.typedef_decl_underlying_type();
     let ty = try!(trans_type(ty, renames));
 
-    let decl = format!("{{feat}}pub type {} = {};", name, ty);
+    let decl = format!("pub type {} = {};", name, ty);
 
     let annot = decl_cur.location().display_short().to_string();
-    output.add_typedef_decl(name, feat, decl, annot);
+    output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
 
 /**
 Process a single macro definition.
 */
-fn process_macro_defn(defn_cur: Cursor, _output: &mut Output, _feat: Features) -> Result<(), String> {
+fn process_macro_defn(defn_cur: Cursor, _output: &mut OutputItems, _feat: Features) -> Result<(), String> {
     debug!("process_macro_defn({}, ..)", defn_cur);
 
     let name = defn_cur.spelling();
@@ -939,29 +906,25 @@ impl<'a> Cache<'a> {
 }
 
 /**
-Used to centralise how output is done.
+Used to centralise how output of translated items is done.
 
 One of the major reasons for this is to consolidate disparate bindings.  That is, if the output for both x86 and x86-64 are the same, then they should use a *single* declaration with an appropriate `#[cfg]` attribute.
 
 Note that `annot` is used for "annotations", which are free-form strings that may be emitted as comments in the output.  These are handy for identifying, for example, *where* a declaration originally came from, for debugging purposes.
 */
-struct Output {
+struct OutputItems {
     /// `[name => [(feat, cconv, decl, annot)]]`
-    fn_decls: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
+    fn_items: HashMap<String, Vec<(Features, AbsCallConv, String, String)>>,
 
-    /// `[name => [(feat, decl, annot)]]`
-    struct_decls: HashMap<String, Vec<(Features, String, String)>>,
-
-    /// `[name => [(feat, decl, annot)]]`
-    typedef_decls: HashMap<String, Vec<(Features, String, String)>>,
+    /// `[name => [(header, feat, decl, annot)]]`
+    header_items: HashMap<String, Vec<(String, Features, String, String)>>,
 }
 
-impl Output {
+impl OutputItems {
     fn new() -> Self {
-        Output {
-            fn_decls: HashMap::new(),
-            struct_decls: HashMap::new(),
-            typedef_decls: HashMap::new(),
+        OutputItems {
+            fn_items: HashMap::new(),
+            header_items: HashMap::new(),
         }
     }
 
@@ -970,11 +933,11 @@ impl Output {
 
     If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
     */
-    fn add_func_decl(&mut self, name: String, feat: Features, cconv: AbsCallConv, decl: String, annot: String) {
+    fn add_func_item(&mut self, name: String, feat: Features, cconv: AbsCallConv, decl: String, annot: String) {
         use std::mem::replace;
-        debug!("add_func_decl({:?}, {:?}, {:?}, {:?}, {:?})", name, feat, cconv, decl, annot);
+        debug!("add_func_item({:?}, {:?}, {:?}, {:?}, {:?})", name, feat, cconv, decl, annot);
 
-        let decls = self.fn_decls.entry(name).or_insert(vec![]);
+        let decls = self.fn_items.entry(name).or_insert(vec![]);
 
         // Is there already a decl which is compatible with this one?
         for &mut (ref mut df, ref dcc, ref dd, ref mut da) in decls.iter_mut() {
@@ -995,19 +958,19 @@ impl Output {
     }
 
     /**
-    Adds a structure declaration.
+    Adds a header declaration.
 
     If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
     */
-    fn add_struct_decl(&mut self, name: String, feat: Features, decl: String, annot: String) {
+    fn add_header_item(&mut self, name: String, header: String, feat: Features, decl: String, annot: String) {
         use std::mem::replace;
-        debug!("add_struct_decl({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
+        debug!("add_header_item({:?}, {:?}, {:?}, {:?}, {:?})", header, name, feat, decl, annot);
 
-        let decls = self.struct_decls.entry(name).or_insert(vec![]);
+        let decls = self.header_items.entry(name).or_insert(vec![]);
 
         // Is there already a decl which is compatible with this one?
-        for &mut (ref mut df, ref dd, ref mut da) in decls.iter_mut() {
-            if *dd == decl {
+        for &mut (ref dh, ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+            if *dh == header && *dd == decl {
                 debug!(".. merging");
                 // The decls are the same.  Just combine the feature sets together.
                 let new_df = replace(df, Features::default()).or(feat);
@@ -1020,36 +983,43 @@ impl Output {
 
         // Add it to the set of decls.
         debug!(".. adding");
-        decls.push((feat, decl, annot));
+        decls.push((header, feat, decl, annot));
+    }
+}
+
+/**
+This cache owns the output files and saves us from constantly opening and closing them.
+*/
+struct OutputFiles<'a> {
+    out_config: &'a OutConfig,
+    files: HashMap<path::PathBuf, fs::File>,
+}
+
+impl<'a> OutputFiles<'a> {
+    fn new(out_config: &'a OutConfig) -> Self {
+        OutputFiles {
+            out_config: out_config,
+            files: HashMap::new(),
+        }
     }
 
-    /**
-    Adds a typedef declaration.
+    fn emit_to_header(&mut self, name: &str, feat: &Features, decl: &str, annot: &str) {
+        use std::io::prelude::*;
+        let file = self.get_file(name, &self.out_config.header_path);
+        writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
+    }
 
-    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
-    */
-    fn add_typedef_decl(&mut self, name: String, feat: Features, decl: String, annot: String) {
-        use std::mem::replace;
-        debug!("add_typedef_decl({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
+    fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: &AbsCallConv, decl: &str, annot: &str) {
+        use std::io::prelude::*;
+        let file = self.get_file(name, &self.out_config.library_path);
+        writeln!(file, "{}extern {:?} {{ {} /* {} */ }}", feat, cconv.as_str(), decl, annot).unwrap();
+    }
 
-        let decls = self.typedef_decls.entry(name).or_insert(vec![]);
-
-        // Is there already a decl which is compatible with this one?
-        for &mut (ref mut df, ref dd, ref mut da) in decls.iter_mut() {
-            if *dd == decl {
-                debug!(".. merging");
-                // The decls are the same.  Just combine the feature sets together.
-                let new_df = replace(df, Features::default()).or(feat);
-                *df = new_df;
-                da.push_str(", ");
-                da.push_str(&annot);
-                return;
-            }
-        }
-
-        // Add it to the set of decls.
-        debug!(".. adding");
-        decls.push((feat, decl, annot));
+    fn get_file<'b>(&'b mut self, name: &str, pattern: &str) -> &'b mut fs::File {
+        use std::path::PathBuf;
+        let mut path = PathBuf::from(&self.out_config.output_dir);
+        path.push(pattern.replace("{}", name));
+        self.files.entry(path.clone()).or_insert_with(|| fs::File::create(path).unwrap())
     }
 }
 
