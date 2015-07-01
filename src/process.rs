@@ -36,165 +36,183 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     for exp_config in &gen_config.exp_configs {
         info!("expanding with config {:?}", exp_config);
         info!(".. switches: {:?}", exp_config.switches());
-        let root_tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse root TU");
-        let feat_mask = exp_config.arch.to_features();
-
-        type Vcii = ::std::vec::IntoIter<Cursor>;
-
-        let mut decl_curs = root_tu.cursor().children().into_iter();
-        let mut deferred: Vec<Cursor> = vec![];
-        let mut deferred_iter = None;
-
-        fn next_from(dc: &mut Vcii, d: &mut Vec<Cursor>, di: &mut Option<Vcii>) -> Option<Cursor> {
-            use std::mem::replace;
-
-            if let Some(cur) = di.as_mut().and_then(|di| di.next()) {
-                return Some(cur)
-            }
-
-            *di = None;
-
-            if d.len() > 0 {
-                *di = Some(replace(d, vec![]).into_iter());
-                return next_from(dc, d, di);
-            }
-
-            dc.next()
-        }
-
-        while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
-            if gen_config.should_ignore(&decl_cur) {
-                debug!("ignoring: {}", decl_cur);
-            } else {
-                process_decl(
-                    decl_cur,
-                    feat_mask.clone(),
-                    exp_config.native_cc,
-                    &mut output,
-                    &mut cache,
-                    &mut |cur| deferred.push(cur),
-                );
-            }
-        }
+        process_decls(path, gen_config, exp_config, &mut output, &mut cache);
     }
 
     info!("generating output...");
-    {
-        let typedef_decls = output.typedef_decls;
-        let mut names: Vec<_> = typedef_decls.keys().collect();
-        names.sort();
-
-        for (name, &ref decls) in names.into_iter().map(|k| (k, &typedef_decls[k])) {
-            let mut decl_set = vec![];
-            for &(ref feat, ref decl, ref annot) in decls {
-                debug!(".. {} ({}): {:?}", name, annot, feat);
-                decl_set.push(format!("{decl} /* {annot} */",
-                    annot = annot,
-                    decl = decl.replace(
-                        "{feat}",
-                        &format!("{:<33}", feat.to_string())
-                    )
-                ));
-            }
-            decl_set.sort();
-            for decl in decl_set {
-                println!("{}", decl);
-            }
-        }
-    }
-    {
-        let struct_decls = output.struct_decls;
-        let mut names: Vec<_> = struct_decls.keys().collect();
-        names.sort();
-
-        for (name, &ref decls) in names.into_iter().map(|k| (k, &struct_decls[k])) {
-            let mut decl_set = vec![];
-            for &(ref feat, ref decl, ref annot) in decls {
-                debug!(".. {} ({}): {:?}", name, annot, feat);
-                decl_set.push(format!("{decl} /* {annot} */",
-                    annot = annot,
-                    decl = decl.replace(
-                        "{feat}",
-                        &format!("{:<33}", feat.to_string())
-                    )
-                ));
-            }
-            decl_set.sort();
-            for decl in decl_set {
-                println!("{}", decl);
-            }
-        }
-    }
-    {
-        let fn_decls = output.fn_decls;
-        let mut names: Vec<_> = fn_decls.keys().collect();
-        names.sort();
-
-        for (name, &ref decls) in names.into_iter().map(|k| (k, &fn_decls[k])) {
-            let mut decl_set = vec![];
-            for &(ref feat, ref cc, ref decl, ref annot) in decls {
-                debug!(".. {} ({}): {:?}", name, annot, feat);
-                decl_set.push(format!("{extern_:<15} {{ {decl} }} /* {annot} */",
-                    extern_ = format!("extern {:?}", cc.as_str()),
-                    annot = annot,
-                    decl = decl.replace(
-                        "{feat}",
-                        &format!("{:<33}", feat.to_string())
-                    )
-                ));
-            }
-            decl_set.sort();
-            for decl in decl_set {
-                println!("{}", decl);
-            }
-        }
-    }
+    output_typedef_decls(&output);
+    output_struct_decls(&output);
+    output_func_decls(&output);
 
     info!("sanity-checking features...");
-    {
-        use std::collections::BTreeSet;
+    sanity_check_features(&mut cache);
+}
 
-        let mut weird_vers = BTreeSet::new();
+fn process_decls(
+    path: &str,
+    gen_config: &GenConfig,
+    exp_config: &ExpConfig,
+    output: &mut Output,
+    cache: &mut Cache,
+) {
+    let root_tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse root TU");
+    let feat_mask = exp_config.arch.to_features();
 
-        cache.iter_features(|path, line, &ref feat| {
-            use features::Partitions;
+    type Vcii = ::std::vec::IntoIter<Cursor>;
 
-            /*
-            What we're looking for are any features that might mess up the expansion.  This currently means:
+    let mut decl_curs = root_tu.cursor().children().into_iter();
+    let mut deferred: Vec<Cursor> = vec![];
+    let mut deferred_iter = None;
 
-            - Features with upper limits on versions.
-            - Features that *do not* target the desktop.
-            */
+    fn next_from(dc: &mut Vcii, d: &mut Vec<Cursor>, di: &mut Option<Vcii>) -> Option<Cursor> {
+        use std::mem::replace;
 
-            let mut suspect = vec![];
+        if let Some(cur) = di.as_mut().and_then(|di| di.next()) {
+            return Some(cur)
+        }
 
-            if let Some(ref parts) = feat.parts {
-                if (parts.clone() & Partitions::DesktopApp).is_empty() {
-                    suspect.push("non-desktop-app");
+        *di = None;
+
+        if d.len() > 0 {
+            *di = Some(replace(d, vec![]).into_iter());
+            return next_from(dc, d, di);
+        }
+
+        dc.next()
+    }
+
+    while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
+        if gen_config.should_ignore(&decl_cur) {
+            debug!("ignoring: {}", decl_cur);
+        } else {
+            process_decl(
+                decl_cur,
+                feat_mask.clone(),
+                exp_config.native_cc,
+                output,
+                cache,
+                &mut |cur| deferred.push(cur),
+            );
+        }
+    }
+}
+
+fn output_typedef_decls(output: &Output) {
+    let typedef_decls = &output.typedef_decls;
+    let mut names: Vec<_> = typedef_decls.keys().collect();
+    names.sort();
+
+    for (name, &ref decls) in names.into_iter().map(|k| (k, &typedef_decls[k])) {
+        let mut decl_set = vec![];
+        for &(ref feat, ref decl, ref annot) in decls {
+            debug!(".. {} ({}): {:?}", name, annot, feat);
+            decl_set.push(format!("{decl} /* {annot} */",
+                annot = annot,
+                decl = decl.replace(
+                    "{feat}",
+                    &format!("{:<33}", feat.to_string())
+                )
+            ));
+        }
+        decl_set.sort();
+        for decl in decl_set {
+            println!("{}", decl);
+        }
+    }
+}
+
+fn output_struct_decls(output: &Output) {
+    let struct_decls = &output.struct_decls;
+    let mut names: Vec<_> = struct_decls.keys().collect();
+    names.sort();
+
+    for (name, &ref decls) in names.into_iter().map(|k| (k, &struct_decls[k])) {
+        let mut decl_set = vec![];
+        for &(ref feat, ref decl, ref annot) in decls {
+            debug!(".. {} ({}): {:?}", name, annot, feat);
+            decl_set.push(format!("{decl} /* {annot} */",
+                annot = annot,
+                decl = decl.replace(
+                    "{feat}",
+                    &format!("{:<33}", feat.to_string())
+                )
+            ));
+        }
+        decl_set.sort();
+        for decl in decl_set {
+            println!("{}", decl);
+        }
+    }
+}
+
+fn output_func_decls(output: &Output) {
+    let fn_decls = &output.fn_decls;
+    let mut names: Vec<_> = fn_decls.keys().collect();
+    names.sort();
+
+    for (name, &ref decls) in names.into_iter().map(|k| (k, &fn_decls[k])) {
+        let mut decl_set = vec![];
+        for &(ref feat, ref cc, ref decl, ref annot) in decls {
+            debug!(".. {} ({}): {:?}", name, annot, feat);
+            decl_set.push(format!("{extern_:<15} {{ {decl} }} /* {annot} */",
+                extern_ = format!("extern {:?}", cc.as_str()),
+                annot = annot,
+                decl = decl.replace(
+                    "{feat}",
+                    &format!("{:<33}", feat.to_string())
+                )
+            ));
+        }
+        decl_set.sort();
+        for decl in decl_set {
+            println!("{}", decl);
+        }
+    }
+}
+
+fn sanity_check_features(cache: &mut Cache) {
+    use std::collections::BTreeSet;
+
+    let mut weird_vers = BTreeSet::new();
+
+    cache.iter_features(|path, line, &ref feat| {
+        use features::Partitions;
+
+        /*
+        What we're looking for are any features that might mess up the expansion.  This currently means:
+
+        - Features with upper limits on versions.
+        - Features that *do not* target the desktop.
+        */
+
+        let mut suspect = vec![];
+
+        if let Some(ref parts) = feat.parts {
+            if (parts.clone() & Partitions::DesktopApp).is_empty() {
+                suspect.push("non-desktop-app");
+            }
+        }
+
+        if let Some(ref winver) = feat.winver {
+            if !winver.is_simple() {
+                for &ref range in winver.ranges() {
+                    weird_vers.insert(range.end);
                 }
+                suspect.push("complex-winver");
             }
+        }
 
-            if let Some(ref winver) = feat.winver {
-                if !winver.is_simple() {
-                    for &ref range in winver.ranges() {
-                        weird_vers.insert(range.end);
-                    }
-                    suspect.push("complex-winver");
-                }
-            }
+        if suspect.len() != 0 {
+            warn!("suspect feature set: {}:{}: {} {:?}",
+                path, line, suspect.connect(", "), feat);
+        }
+    });
 
-            if suspect.len() != 0 {
-                warn!("suspect feature set: {}:{}: {} {:?}",
-                    path, line, suspect.connect(", "), feat);
-            }
-        });
-
-        if weird_vers.len() > 0 {
-            warn!("suspect versions:");
-            for ver in weird_vers {
-                warn!(".. 0x{:08x} - {:?}",
-                    ver, WinVersion::from_u32_round_up(ver));
-            }
+    if weird_vers.len() > 0 {
+        warn!("suspect versions:");
+        for ver in weird_vers {
+            warn!(".. 0x{:08x} - {:?}",
+                ver, WinVersion::from_u32_round_up(ver));
         }
     }
 }
