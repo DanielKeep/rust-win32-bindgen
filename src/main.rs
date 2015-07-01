@@ -65,6 +65,9 @@ fn try_main_mingw() -> Result<(), String> {
         ],
         switches: vec![
         ],
+        non_canonical_tag_names: vec![
+            re("^tag[A-Z_]"),
+        ],
     };
 
     win32_bindgen::process_header(
@@ -92,6 +95,9 @@ fn try_main_msvc() -> Result<(), String> {
             r#"-Ilocal/Include/shared"#.into(),
             r#"-Ilocal/Include/um"#.into(),
         ],
+        non_canonical_tag_names: vec![
+            re("^tag[A-Z_]"),
+        ],
     };
 
     win32_bindgen::process_header(
@@ -112,6 +118,7 @@ pub struct Config {
     pub ignore_decl_spellings: Vec<String>,
     pub ignore_file_paths: Vec<String>,
     pub switches: Vec<String>,
+    pub non_canonical_tag_names: Vec<String>,
 }
 
 impl Config {
@@ -121,6 +128,7 @@ impl Config {
             ignore_decl_spellings: self.ignore_decl_spellings.into_iter().map(|s| re(&s)).collect(),
             ignore_file_paths: self.ignore_file_paths.into_iter().map(|s| re(&s)).collect(),
             switches: self.switches,
+            non_canonical_tag_names: self.non_canonical_tag_names.into_iter().map(|s| re(&s)).collect(),
         }
     }
 }

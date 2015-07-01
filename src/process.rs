@@ -3,7 +3,7 @@ This module contains the bulk of the header-processing code, and the core struct
 
 Note that it specifically *does not* contain conditional expression handling, or feature set abstractions.
 */
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use itertools::Itertools;
 use {ExpConfig, GenConfig, NativeCallConv, WinVersion};
@@ -36,7 +36,9 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     for exp_config in &gen_config.exp_configs {
         info!("expanding with config {:?}", exp_config);
         info!(".. switches: {:?}", exp_config.switches());
-        process_decls(path, gen_config, exp_config, &mut output, &mut cache);
+        let tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse TU");
+        let renames = scan_for_renames(tu.clone(), gen_config);
+        process_decls(tu, gen_config, exp_config, &mut output, &mut cache, &renames);
     }
 
     info!("generating output...");
@@ -48,42 +50,208 @@ pub fn process_header(path: &str, gen_config: &GenConfig) {
     sanity_check_features(&mut cache);
 }
 
+/**
+A helper method that yields the "next" cursor to process from both a primary sequence and a list of deferred items.
+*/
+fn next_from(
+    dc: &mut ::std::vec::IntoIter<Cursor>,
+    d: &mut Vec<Cursor>,
+    di: &mut Option<::std::vec::IntoIter<Cursor>>
+) -> Option<Cursor> {
+    use std::mem::replace;
+
+    if let Some(cur) = di.as_mut().and_then(|di| di.next()) {
+        return Some(cur)
+    }
+
+    *di = None;
+
+    if d.len() > 0 {
+        *di = Some(replace(d, vec![]).into_iter());
+        return next_from(dc, d, di);
+    }
+
+    dc.next()
+}
+
+struct Renames {
+    renames: HashMap<Cursor, Cursor>,
+    invalidations: HashSet<Cursor>,
+}
+
+impl Renames {
+    fn add_rename(&mut self, from: Cursor, to: Cursor) {
+        assert!(!self.is_renamed(&from), "definition is already renamed");
+        assert!(!self.invalidations.contains(&to), "already have invalidation");
+        self.renames.insert(from, to.clone());
+        self.invalidations.insert(to);
+    }
+
+    fn is_invalidated(&self, decl_cur: &Cursor) -> bool {
+        self.invalidations.contains(decl_cur)
+    }
+
+    fn is_renamed(&self, defn_cur: &Cursor) -> bool {
+        self.renames.contains_key(defn_cur)
+    }
+
+    fn rename_decl<'a, 'b>(&'a self, decl_cur: &'b Cursor) -> Result<&'a Cursor, &'b Cursor> {
+        if let Some(&ref cur) = self.renames.get(decl_cur) {
+            Ok(cur)
+        } else {
+            Err(decl_cur)
+        }
+    }
+
+    fn rename_ty(&self, ty: clang::Type) -> Result<clang::Cursor, clang::Type> {
+        use clang::TypeKind as TK;
+
+        // We're only concerned about structs, enums and unions.
+        match ty.kind() {
+            TK::Record | TK::Enum => {
+                let ty_decl = match ty.declaration().definition() {
+                    Some(cur) => cur,
+                    None => return Err(ty)
+                };
+                if let Some(&ref cur) = self.renames.get(&ty_decl) {
+                    return Ok(cur.clone());
+                }
+                Err(ty)
+            },
+            _ => Err(ty)
+        }
+    }
+}
+
+impl Default for Renames {
+    fn default() -> Self {
+        Renames {
+            renames: HashMap::new(),
+            invalidations: HashSet::new(),
+        }
+    }
+}
+
+fn scan_for_renames(tu: Rc<TranslationUnit>, gen_config: &GenConfig) -> Renames {
+    /*
+    The goal here is to find two kinds of things:
+
+    1. Types which have *no* name in tag space, but are given one via typedef.
+    2. Types which *have* a name in tag space, but the *canonical* name is given via typedef.
+
+    We handle both of these by scanning through all the typedefs.  If we find one whose subject is one of the above types, we record the subject's cursor and the *new* name, as well as an "invalidation" of the typedef's cursor.
+    */
+    info!("scanning for renames...");
+    let mut renames = Renames::default();
+    let mut decl_curs = tu.cursor().children().into_iter();
+    let mut deferred: Vec<Cursor> = vec![];
+    let mut deferred_iter = None;
+
+    while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
+        if !gen_config.should_ignore(&decl_cur) {
+            let rename = scan_decl_for_rename(decl_cur, gen_config, &renames, &mut |cur| deferred.push(cur));
+            if let Some((from, to)) = rename {
+                renames.add_rename(from, to);
+            }
+        }
+    }
+
+    renames
+}
+
+fn scan_decl_for_rename<Defer>(
+    decl_cur: Cursor,
+    gen_config: &GenConfig,
+    renames: &Renames,
+    mut defer: Defer,
+) -> Option<(Cursor, Cursor)>
+where Defer: FnMut(Cursor) {
+    use clang::CursorKind as CK;
+    use clang::TypeKind as TK;
+
+    match decl_cur.kind() {
+        CK::TypedefDecl => (),
+        _ => return None
+    }
+
+    info!("scan_decl_for_rename({}, ..)", decl_cur);
+
+    let ty = decl_cur.typedef_decl_underlying_type();
+
+    // Resolve unexposed types if possible.
+    let ty = match ty.kind() {
+        TK::Unexposed => ty.canonical(),
+        _ => ty
+    };
+
+    // We don't want to even look at things that aren't just direct ADT typedefs.
+    match ty.kind() {
+        TK::Record | TK::Enum => (),
+        other => {
+            debug!(".. ignoring indirect typedef: {:?}", other);
+            return None;
+        }
+    }
+
+    // Get the original type definition.
+    let ty_defn = ty.declaration().definition();
+    let ty_defn = match ty_defn {
+        Some(c) => c,
+        None => {
+            debug!(".. ignoring; has no definition");
+            return None;
+        }
+    };
+
+    // Double-check that this is really what we think it is.
+    match ty_defn.kind() {
+        CK::StructDecl | CK::EnumDecl | CK::UnionDecl => (),
+        other => {
+            debug!(".. ignoring non-adt target: {:?}", other);
+            return None;
+        }
+    };
+
+    // Defer all the child cursors.
+    for child in ty_defn.children() { defer(child); }
+
+    // Check if it's already canonical.
+    let ty_name = ty_defn.spelling();
+    if !gen_config.is_tag_name_non_canonical(&ty_name) {
+        debug!(".. ignoring canonical name {:?}", ty_name);
+        return None;
+    }
+
+    // Finally, make sure we aren't renaming it more than once.
+    if renames.is_renamed(&ty_defn) {
+        debug!(".. ignoring; already renamed");
+        return None;
+    }
+
+    // Do the rename.
+    debug!(".. renaming {} to {}", ty_defn, decl_cur);
+    Some((ty_defn, decl_cur))
+}
+
 fn process_decls(
-    path: &str,
+    tu: Rc<TranslationUnit>,
     gen_config: &GenConfig,
     exp_config: &ExpConfig,
     output: &mut Output,
     cache: &mut Cache,
+    renames: &Renames,
 ) {
-    let root_tu = cache.tu.parse_translation_unit(path, exp_config).ok().expect("parse root TU");
     let feat_mask = exp_config.arch.to_features();
 
-    type Vcii = ::std::vec::IntoIter<Cursor>;
-
-    let mut decl_curs = root_tu.cursor().children().into_iter();
+    let mut decl_curs = tu.cursor().children().into_iter();
     let mut deferred: Vec<Cursor> = vec![];
     let mut deferred_iter = None;
-
-    fn next_from(dc: &mut Vcii, d: &mut Vec<Cursor>, di: &mut Option<Vcii>) -> Option<Cursor> {
-        use std::mem::replace;
-
-        if let Some(cur) = di.as_mut().and_then(|di| di.next()) {
-            return Some(cur)
-        }
-
-        *di = None;
-
-        if d.len() > 0 {
-            *di = Some(replace(d, vec![]).into_iter());
-            return next_from(dc, d, di);
-        }
-
-        dc.next()
-    }
 
     while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
         if gen_config.should_ignore(&decl_cur) {
             debug!("ignoring: {}", decl_cur);
+        } else if renames.is_invalidated(&decl_cur) {
+            debug!("invalidated: {}", decl_cur);
         } else {
             process_decl(
                 decl_cur,
@@ -91,6 +259,7 @@ fn process_decls(
                 exp_config.native_cc,
                 output,
                 cache,
+                renames,
                 &mut |cur| deferred.push(cur),
             );
         }
@@ -226,6 +395,7 @@ fn process_decl<Defer>(
     native_cc: NativeCallConv,
     output: &mut Output,
     cache: &mut Cache,
+    renames: &Renames,
     defer: &mut Defer,
 )
 where Defer: FnMut(Cursor)
@@ -274,11 +444,11 @@ where Defer: FnMut(Cursor)
         | CK::MacroInstantiation
         => unreachable!(),
 
-        CK::StructDecl => process_struct_decl(decl_cur, output, feat, defer),
-        CK::UnionDecl => process_union_decl(decl_cur, output, feat, defer),
-        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, defer),
-        CK::FunctionDecl => process_function_decl(decl_cur, output, feat, native_cc),
-        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat),
+        CK::StructDecl => process_struct_decl(decl_cur, output, feat, renames, defer),
+        CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, defer),
+        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, defer),
+        CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, native_cc),
+        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames),
         CK::MacroDefinition => process_macro_defn(decl_cur, output, feat),
 
         kind => {
@@ -300,6 +470,7 @@ fn process_struct_decl<Defer>(
     decl_cur: Cursor,
     output: &mut Output,
     feat: Features,
+    renames: &Renames,
     defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -308,7 +479,13 @@ where Defer: FnMut(Cursor)
 
     debug!("process_struct_decl({}, ..)", decl_cur);
 
-    let name = try!(name_for_maybe_anon(&decl_cur));
+    let name = match renames.rename_decl(&decl_cur) {
+        Ok(cur) => {
+            debug!(".. was renamed to {}", cur);
+            cur.spelling()
+        },
+        Err(cur) => try!(name_for_maybe_anon(&cur))
+    };
     let annot = decl_cur.location().display_short().to_string();
 
     match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
@@ -339,7 +516,7 @@ where Defer: FnMut(Cursor)
 
             CK::FieldDecl => {
                 let name = child_cur.spelling();
-                let ty = match trans_type(child_cur.type_()) {
+                let ty = match trans_type(child_cur.type_(), renames) {
                     Ok(ty) => ty,
                     Err(err) => {
                         if EMIT_STUBS {
@@ -385,6 +562,7 @@ fn process_union_decl<Defer>(
     decl_cur: Cursor,
     output: &mut Output,
     feat: Features,
+    _renames: &Renames,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -412,6 +590,7 @@ fn process_enum_decl<Defer>(
     decl_cur: Cursor,
     output: &mut Output,
     feat: Features,
+    _renames: &Renames,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -454,6 +633,7 @@ fn process_function_decl(
     decl_cur: Cursor,
     output: &mut Output,
     feat: Features,
+    renames: &Renames,
     native_cc: NativeCallConv
 ) -> Result<(), String> {
     use clang::CallingConv as CC;
@@ -484,10 +664,10 @@ fn process_function_decl(
     let res_ty = if ty.result().kind() == clang::TypeKind::Void {
         String::new()
     } else {
-        format!(" -> {}", try!(trans_type(ty.result())))
+        format!(" -> {}", try!(trans_type(ty.result(), renames)))
     };
 
-    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(trans_type).collect());
+    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames)).collect());
     let arg_tys = arg_tys.connect(", ");
 
     let decl = format!(
@@ -505,12 +685,17 @@ fn process_function_decl(
 /**
 Process a single structure declaration.
 */
-fn process_typedef_decl(decl_cur: Cursor, output: &mut Output, feat: Features) -> Result<(), String> {
+fn process_typedef_decl(
+    decl_cur: Cursor,
+    output: &mut Output,
+    feat: Features,
+    renames: &Renames,
+) -> Result<(), String> {
     debug!("process_typedef_decl({}, ..)", decl_cur);
     let name = decl_cur.spelling();
 
     let ty = decl_cur.typedef_decl_underlying_type();
-    let ty = try!(trans_type(ty));
+    let ty = try!(trans_type(ty, renames));
 
     let decl = format!("{{feat}}pub type {} = {};", name, ty);
 
@@ -542,9 +727,9 @@ Translate a type into an equivalent Rust type reference.
 
 Note that this **is not** for translating type declarations; you cannot just pass a structure definition.
 */
-fn trans_type(ty: clang::Type) -> Result<String, String> {
+fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
     use clang::TypeKind as TK;
-    debug!("trans_type({:?} {:?})", ty.kind(), ty.spelling());
+    debug!("trans_type({:?} {:?}, _)", ty.kind(), ty.spelling());
 
     /**
     This works out the module qualifier for a given type.  This is intended to let you put types into files based on their source header.
@@ -557,6 +742,15 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
         }
     }
 
+    let ty = match renames.rename_ty(ty) {
+        Ok(cur) => {
+            // Use whatever we've been given and don't look too closely...
+            let qual = mod_qual(&cur);
+            return Ok(format!("{}{}", qual, cur.spelling()));
+        },
+        Err(ty) => ty
+    };
+
     match ty.kind() {
         TK::Invalid => Err("invalid type".into()),
 
@@ -564,7 +758,7 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
             let canon_ty = ty.canonical();
             match canon_ty.kind() {
                 TK::Unexposed => Err(format!("recursively unexposed type {}", canon_ty.spelling())),
-                _ => trans_type(canon_ty)
+                _ => trans_type(canon_ty, renames)
             }
         },
 
@@ -594,7 +788,7 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
             // We want to know whether the thing we're pointing to is const or not.
             let pointee_ty = ty.pointee();
             let mut_ = if pointee_ty.is_const_qualified() { "const" } else { "mut" };
-            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty))))
+            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty, renames))))
         },
 
         TK::Record
@@ -610,13 +804,13 @@ fn trans_type(ty: clang::Type) -> Result<String, String> {
             let elem_ty = ty.array_element_type();
             let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
             let len = ty.array_size();
-            Ok(format!("*{} [{}; {}]", mut_, try!(trans_type(elem_ty)), len))
+            Ok(format!("*{} [{}; {}]", mut_, try!(trans_type(elem_ty, renames)), len))
         },
 
         TK::IncompleteArray => {
             let elem_ty = ty.array_element_type();
             let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
-            Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty))))
+            Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty, renames))))
         },
 
         // **Note**: This isn't currently in `libc`, and does *not* have a platform-independent definition.

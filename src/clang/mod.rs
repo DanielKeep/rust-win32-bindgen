@@ -435,6 +435,14 @@ impl fmt::Display for Cursor {
     }
 }
 
+impl ::std::hash::Hash for Cursor {
+    fn hash<H>(&self, state: &mut H) where H: ::std::hash::Hasher {
+        unsafe {
+            ll::clang_hashCursor(self.1).hash(state)
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum VisitAction {

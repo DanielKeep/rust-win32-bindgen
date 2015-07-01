@@ -174,9 +174,32 @@ pub struct GenConfig {
     Like `ignore_decl_spellings`, except that this works based on the path to the file that contains a declaration.  This is useful for excluding "internal" headers that shouldn't be publically exposed.
     */
     pub ignore_file_paths: Vec<Regex>,
+
+    /**
+    A set of patterns that define what constitutes a "non-canonical" tag name.
+
+    When a struct, enum or union whose tag name matches one of these patterns is encountered, the processor internally renames it (if possible) to whatever the first direct typedef is called.  For example, given:
+
+    ```c
+    typedef struct tagFoo {
+        ...
+    } *Bar, Quxx;
+    ```
+
+    And a pattern `^tag`, the processor will rename `tagFoo` to `Quxx` in the output.  It will also *omit* the `Quxx` -> `Foo` typedef entirely.
+    */
+    pub non_canonical_tag_names: Vec<Regex>,
 }
 
 impl GenConfig {
+    /// Determines whether or not the given tag name is canonical.
+    fn is_tag_name_non_canonical(&self, name: &str) -> bool {
+        for &ref re in &self.non_canonical_tag_names {
+            if re.is_match(name) { return true; }
+        }
+        false
+    }
+
     /// Return the switches that should be passed to Clang, indepedent of expansion.
     fn switches(&self) -> &[String] {
         &self.switches
