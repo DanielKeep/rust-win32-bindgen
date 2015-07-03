@@ -820,17 +820,11 @@ impl Token {
         Token(tu, tok)
     }
 
-    // pub fn clang_getTokenSpelling(arg1: CXTranslationUnit, arg2: CXToken) -> CXString;
-
     pub fn extent(&self) -> Option<SourceRange> {
         unsafe {
             SourceRange::from_ll(self.0.clone(), ll::clang_getTokenExtent((*self.0).1, self.1))
         }
     }
-    
-    // pub fn clang_getTokenLocation(arg1: CXTranslationUnit, arg2: CXToken) -> CXSourceLocation;
-    
-    // pub fn clang_getTokenExtent(arg1: CXTranslationUnit, arg2: CXToken) -> CXSourceRange;
 
     pub fn location(&self) -> SourceLocation {
         unsafe {
