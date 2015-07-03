@@ -18,7 +18,7 @@ use clang::{
 use features::{Features, scan_features};
 use util;
 
-const EMIT_STUBS: bool = false;
+const EMIT_STUBS: bool = true;
 
 /**
 This is effectively the "entry point" for processing.  Given a header and a configuration, it attempts to generate a Rust binding.
