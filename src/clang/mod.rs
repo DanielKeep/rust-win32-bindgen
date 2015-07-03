@@ -266,6 +266,10 @@ impl Tokens {
         Token::from_ll(self.tu.clone(), self.as_slice_ll()[index])
     }
 
+    pub fn get(&self, index: usize) -> Option<Token> {
+        self.as_slice_ll().get(index).map(|t| Token::from_ll(self.tu.clone(), *t))
+    }
+
     pub fn len(&self) -> usize {
         self.unsafe_len as usize
     }
@@ -284,26 +288,53 @@ impl<'a> IntoIterator for &'a Tokens {
     type IntoIter = TokensIter<'a>;
 
     fn into_iter(self) -> TokensIter<'a> {
-        TokensIter {
-            tokens: self,
-            index: 0,
-        }
+        TokensIter::new(self)
     }
 }
 
 pub struct TokensIter<'a> {
     tokens: &'a Tokens,
-    index: u32,
+    low: u32,
+    high: u32,
+}
+
+impl<'a> TokensIter<'a> {
+    fn new(tokens: &'a Tokens) -> Self {
+        TokensIter {
+            tokens: tokens,
+            low: 0,
+            high: tokens.len() as u32, // TODO: checked
+        }
+    }
 }
 
 impl<'a> Iterator for TokensIter<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
-        if self.index as usize >= self.tokens.len() { return None; }
-        let r = self.tokens.at(self.index as usize);
-        self.index += 1;
+        if self.low >= self.high { return None; }
+        let r = self.tokens.at(self.low as usize);
+        self.low += 1;
         Some(r)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'a> DoubleEndedIterator for TokensIter<'a> {
+    fn next_back(&mut self) -> Option<Token> {
+        if self.high == 0 { return None; }
+        self.high -= 1;
+        Some(self.tokens.at(self.high as usize))
+    }
+}
+
+impl<'a> ExactSizeIterator for TokensIter<'a> {
+    fn len(&self) -> usize {
+        (self.high - self.low) as usize
     }
 }
 
@@ -692,6 +723,10 @@ impl SourceLocation {
         }
     }
 
+    pub fn column(&self) -> u32 {
+        self.instantiation_location().2
+    }
+
     pub fn display_short(&self) -> SourceLocationShortDisplay {
         SourceLocationShortDisplay(self)
     }
@@ -787,9 +822,9 @@ impl Token {
 
     // pub fn clang_getTokenSpelling(arg1: CXTranslationUnit, arg2: CXToken) -> CXString;
 
-    pub fn spelling(&self) -> String {
+    pub fn extent(&self) -> Option<SourceRange> {
         unsafe {
-            cxstring_to_string(ll::clang_getTokenSpelling((*self.0).1, self.1))
+            SourceRange::from_ll(self.0.clone(), ll::clang_getTokenExtent((*self.0).1, self.1))
         }
     }
     
@@ -800,6 +835,12 @@ impl Token {
     pub fn location(&self) -> SourceLocation {
         unsafe {
             SourceLocation::from_ll(self.0.clone(), ll::clang_getTokenLocation((*self.0).1, self.1))
+        }
+    }
+
+    pub fn spelling(&self) -> String {
+        unsafe {
+            cxstring_to_string(ll::clang_getTokenSpelling((*self.0).1, self.1))
         }
     }
 }
@@ -962,4 +1003,30 @@ c_enum! {
 impl TypeKind {
     #[allow(non_upper_case_globals)] pub const FirstBuiltin: TypeKind = /* 2 */ TypeKind::Void;
     #[allow(non_upper_case_globals)] pub const LastBuiltin: TypeKind = /* 29 */ TypeKind::ObjCSel;
+}
+
+pub struct SourceRange(Rc<TranslationUnit>, ll::CXSourceRange);
+
+impl SourceRange {
+    fn from_ll(tu: Rc<TranslationUnit>, sr: ll::CXSourceRange) -> Option<Self> {
+        unsafe {
+            if ll::clang_Range_isNull(sr) != 0 {
+                None
+            } else {
+                Some(SourceRange(tu, sr))
+            }
+        }
+    }
+
+    pub fn start(&self) -> SourceLocation {
+        unsafe {
+            SourceLocation::from_ll(self.0.clone(), ll::clang_getRangeStart(self.1))
+        }
+    }
+
+    pub fn end(&self) -> SourceLocation {
+        unsafe {
+            SourceLocation::from_ll(self.0.clone(), ll::clang_getRangeEnd(self.1))
+        }
+    }
 }

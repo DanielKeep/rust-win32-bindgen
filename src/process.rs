@@ -686,16 +686,31 @@ fn process_typedef_decl(
 /**
 Process a single macro definition.
 */
-fn process_macro_defn(defn_cur: Cursor, _output: &mut OutputItems, _feat: Features) -> Result<(), String> {
+fn process_macro_defn(defn_cur: Cursor, output: &mut OutputItems, feat: Features) -> Result<(), String> {
     debug!("process_macro_defn({}, ..)", defn_cur);
 
     let name = defn_cur.spelling();
-    let _annot = defn_cur.location().display_short().to_string();
-    let mut toks: Vec<_> = defn_cur.tokenize().into_iter().skip(1).map(|t| t.spelling()).collect();
-    toks.pop(); // Drop last because it's just a newline.
+    let header = file_stem(&defn_cur);
+    let annot = defn_cur.location().display_short().to_string();
+
+    // Note: we skip the last token because it's just a newline.
+    let toks = defn_cur.tokenize();
+    let first_tok = toks.at(0);
+    let next_tok = toks.get(1);
+    let toks: Vec<_> = toks.into_iter().dropping(1).dropping_back(1).map(|t| t.spelling()).collect();
+
+    // Work out whether this is a functionish macro or not.
+    let is_fn_macro = {
+        let first_col = first_tok.extent().expect("extent for macro first tok").end().column();
+        let next_col = next_tok.map(|t| t.extent().expect("extent for macro next tok").end().column()).unwrap_or(!0);
+        first_col + 1 == next_col
+    };
 
     if EMIT_STUBS {
-        println!("// #define {} {:?}", name, toks);
+        let spacer = if is_fn_macro { "" } else { " " };
+        let defn = toks.connect(" ");
+        let decl = format!("// #define {}{}{}", name, spacer, defn);
+        output.add_header_item(name, header, feat, decl, annot);
     }
 
     Ok(())
