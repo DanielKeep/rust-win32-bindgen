@@ -29,6 +29,7 @@ use features::Features;
 mod clang;
 mod features;
 mod generated;
+mod ppmac;
 mod process;
 mod util;
 
