@@ -2,13 +2,19 @@ use itertools::Itertools;
 use clang::Cursor;
 use features::Features;
 
-use super::{EMIT_STUBS, file_stem};
+use util::ResultOptionExt;
+use super::{EMIT_STUBS, NameMap, file_stem};
 use super::output::OutputItems;
 
 /**
 Process a single macro definition.
 */
-pub fn process_macro_defn(defn_cur: Cursor, output: &mut OutputItems, feat: Features) -> Result<(), String> {
+pub fn process_macro_defn(
+    defn_cur: Cursor,
+    output: &mut OutputItems,
+    feat: Features,
+    name_map: &mut NameMap,
+) -> Result<(), String> {
     use ::ppmac::parse;
     use ::ppmac::parse::Result as PResult;
 
@@ -53,8 +59,15 @@ pub fn process_macro_defn(defn_cur: Cursor, output: &mut OutputItems, feat: Feat
         }
     };
 
-    if let Some((v, t)) = try_trans_inty_macro(&exp_ast) {
+    if let Some((v, t)) = try!(try_trans_inty_macro(&exp_ast, name_map)) {
         let decl = format!("pub const {}: {} = {}; /* {:?} */", name, t, v, exp_ast);
+        if !(name_map.insert(name.clone(), defn_cur.clone()).is_none()) {
+            error!("could not insert {} {:?} into name_map:", defn_cur, name);
+            for (n,c) in name_map {
+                error!(".. {:?}: {}", n, c);
+            }
+            assert!(false);
+        }
         output.add_header_item(name, header, feat, decl, annot);
         return Ok(());
     }
@@ -67,7 +80,7 @@ pub fn process_macro_defn(defn_cur: Cursor, output: &mut OutputItems, feat: Feat
     Err("unsupported-macro".into())
 }
 
-fn try_trans_inty_macro(node: &::ppmac::Node) -> Option<(String, String)> {
+fn try_trans_inty_macro(node: &::ppmac::Node, name_map: &NameMap) -> Result<Option<(String, String)>, String> {
     use ::ppmac::{Node, Signed, Size, UnaryOp};
     use self::try_trans_inty_macro as ttim;
 
@@ -76,34 +89,51 @@ fn try_trans_inty_macro(node: &::ppmac::Node) -> Option<(String, String)> {
     match *node {
         Node::Call { ref subject, ref args } => match **subject {
             Node::Ident(ref s) => match (&**s, args.len()) {
-                ("TEXT", 1) => ttim(&args[0]),
-                _ => {debug!("ttim: unknown call ident"); None}
+                ("TEXT", 1) => ttim(&args[0], name_map),
+                (name, args) => {
+                    let _decl = match name_map.get(s) {
+                        Some(decl) => decl,
+                        None => return Err(format!("forward-reference to name {:?}", s))
+                    };
+                    debug!("ttim: unknown call ident {} @ {}", name, args);
+                    Ok(None)
+                }
             },
-            _ => {debug!("ttim: non-ident call subject"); None}
+            _ => {debug!("ttim: non-ident call subject"); Ok(None)}
         },
         Node::Cast { ref ty, ref value } => {
             match **ty {
                 Node::Type(ref name, ptr) => {
                     let ptr = if ptr { "*mut " } else { "" };
                     let ty = format!("{}{}", ptr, name);
-                    ttim(value)
-                        .map(|(value, _)| (format!("{} as {}", value, ty), ty))
+                    ttim(value, name_map)
+                        .ro_map(|(value, _)| (format!("{} as {}", value, ty), ty))
                 },
-                _ => None
+                _ => Ok(None)
             }
         },
+        Node::Ident(ref s) => {
+            let _decl = match name_map.get(s) {
+                Some(decl) => decl,
+                None => return Err(format!("forward-reference to name {:?}", s))
+            };
+            // TODO
+            Ok(None)
+        },
         Node::Integer(v, signed, size) => {
-            Some(match (signed, size) {
+            Ok(Some(match (signed, size) {
                 (Signed::No, Size::Unknown) => (format!("{:x}u32", v), "u32".into()),
                 (Signed::No, Size::Long) => (format!("{:x}u64", v), "u64".into()),
                 (Signed::Yes, Size::Unknown) => (format!("{:x}i32", v as i64), "i32".into()),
                 (Signed::Yes, Size::Long) => (format!("{:x}i64", v as i64), "i64".into()),
-            })
+            }))
         },
-        Node::String(ref s, _) => Some((format!("\"{}\"", s), "&'static str".into())),
-        Node::Unary(UnaryOp::Com, ref expr) => ttim(expr).map(|(expr, ty)| (format!("!{}", expr), ty)),
-        Node::Unary(UnaryOp::Neg, ref expr) => ttim(expr).map(|(expr, ty)| (format!("-{}", expr), ty)),
-        ref node => {debug!("ttim: unsupported node: {:?}", node); None}
+        Node::String(ref s, _) => Ok(Some((format!("\"{}\"", s), "&'static str".into()))),
+        Node::Unary(UnaryOp::Com, ref expr) => ttim(expr, name_map).ro_map(|(expr, ty)| (format!("!{}", expr), ty)),
+        Node::Unary(UnaryOp::Neg, ref expr) => ttim(expr, name_map).ro_map(|(expr, ty)| (format!("-{}", expr), ty)),
+        ref node => {
+            debug!("ttim: unsupported node: {:?}", node);
+            Ok(None)
+        }
     }
 }
-

@@ -25,6 +25,8 @@ use self::output::OutputItems;
 
 const EMIT_STUBS: bool = true;
 
+pub type NameMap = HashMap<String, Cursor>;
+
 /**
 Bundles together any caches we need for efficiency.
 */

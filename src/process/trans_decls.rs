@@ -7,7 +7,7 @@ use clang::{
 };
 use features::Features;
 
-use super::{EMIT_STUBS, Cache, file_stem, name_for_maybe_anon, next_from};
+use super::{EMIT_STUBS, Cache, NameMap, file_stem, name_for_maybe_anon, next_from};
 use super::features::get_features_at;
 use super::output::{AbsCallConv, OutputItems};
 use super::renames::Renames;
@@ -22,6 +22,7 @@ pub fn process_decls(
 ) {
     let feat_mask = exp_config.arch.to_features();
 
+    let mut name_map = NameMap::new();
     let mut decl_curs = tu.cursor().children().into_iter();
     let mut deferred: Vec<Cursor> = vec![];
     let mut deferred_iter = None;
@@ -42,6 +43,7 @@ pub fn process_decls(
                 output,
                 cache,
                 renames,
+                &mut name_map,
                 &mut |cur| deferred.push(cur),
             );
         }
@@ -58,6 +60,7 @@ fn process_decl<Defer>(
     output: &mut OutputItems,
     cache: &mut Cache,
     renames: &Renames,
+    name_map: &mut NameMap,
     defer: &mut Defer,
 )
 where Defer: FnMut(Cursor)
@@ -106,12 +109,12 @@ where Defer: FnMut(Cursor)
         | CK::MacroInstantiation
         => unreachable!(),
 
-        CK::StructDecl => process_struct_decl(decl_cur, output, feat, renames, defer),
-        CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, defer),
-        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, defer),
-        CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, native_cc),
-        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames),
-        CK::MacroDefinition => super::trans_macros::process_macro_defn(decl_cur, output, feat),
+        CK::StructDecl => process_struct_decl(decl_cur, output, feat, renames, name_map, defer),
+        CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, name_map, defer),
+        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, name_map, defer),
+        CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, name_map, native_cc),
+        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames, name_map),
+        CK::MacroDefinition => super::trans_macros::process_macro_defn(decl_cur, output, feat, name_map),
 
         kind => {
             warn!("could-not-translate unsupported {:?} {} at {}",
@@ -133,6 +136,7 @@ fn process_struct_decl<Defer>(
     output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
+    name_map: &mut NameMap,
     defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -159,6 +163,7 @@ where Defer: FnMut(Cursor)
             // There *is no* definition!
             debug!(".. no definition found");
             let decl = format!("#[repr(C)] pub struct {};", name);
+            assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
             output.add_header_item(name, header, feat, decl, annot);
             return Ok(())
         },
@@ -177,19 +182,20 @@ where Defer: FnMut(Cursor)
             },
 
             CK::FieldDecl => {
-                let name = child_cur.spelling();
+                let field_name = child_cur.spelling();
                 let ty = match trans_type(child_cur.type_(), renames) {
                     Ok(ty) => ty,
                     Err(err) => {
                         if EMIT_STUBS {
                             // TODO: just stub for now.
                             let decl = format!("#[repr(C)] pub struct {}; /* ERR STUB! */", name);
+                            assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
                             output.add_header_item(name, header, feat, decl, annot);
                         }
                         return Err(err);
                     }
                 };
-                fields.push(format!("{}: {}", name, ty));
+                fields.push(format!("{}: {}", field_name, ty));
             },
 
             CK::UnexposedAttr => {
@@ -213,6 +219,7 @@ where Defer: FnMut(Cursor)
         )
     };
 
+    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
     output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
@@ -225,6 +232,7 @@ fn process_union_decl<Defer>(
     output: &mut OutputItems,
     feat: Features,
     _renames: &Renames,
+    name_map: &mut NameMap,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -241,6 +249,7 @@ where Defer: FnMut(Cursor)
             name = name,
         );
 
+        assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
         output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
@@ -254,6 +263,7 @@ fn process_enum_decl<Defer>(
     output: &mut OutputItems,
     feat: Features,
     _renames: &Renames,
+    name_map: &mut NameMap,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -270,6 +280,7 @@ where Defer: FnMut(Cursor)
             name = name,
         );
 
+        assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
         output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
@@ -283,6 +294,7 @@ fn process_function_decl(
     output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
+    name_map: &mut NameMap,
     native_cc: NativeCallConv
 ) -> Result<(), String> {
     use clang::CallingConv as CC;
@@ -327,6 +339,7 @@ fn process_function_decl(
     );
 
     let annot = decl_cur.location().display_short().to_string();
+    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
     output.add_func_item(name, feat, cconv, decl, annot);
     Ok(())
 }
@@ -339,6 +352,7 @@ fn process_typedef_decl(
     output: &mut OutputItems,
     feat: Features,
     renames: &Renames,
+    name_map: &mut NameMap,
 ) -> Result<(), String> {
     debug!("process_typedef_decl({}, ..)", decl_cur);
     let name = decl_cur.spelling();
@@ -350,6 +364,7 @@ fn process_typedef_decl(
     let decl = format!("pub type {} = {};", name, ty);
 
     let annot = decl_cur.location().display_short().to_string();
+    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
     output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }

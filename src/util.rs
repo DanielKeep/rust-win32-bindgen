@@ -84,6 +84,9 @@ pub trait ResultOptionExt<T, E> {
 
     fn ro_and_then<T1, F>(self, f: F) -> Result<Option<T1>, E>
     where F: FnOnce(T) -> Result<Option<T1>, E>;
+
+    fn ro_map<T1, F>(self, f: F) -> Result<Option<T1>, E>
+    where F: FnOnce(T) -> T1;
 }
 
 impl<T, E> ResultOptionExt<T, E> for Result<Option<T>, E> {
@@ -100,6 +103,15 @@ impl<T, E> ResultOptionExt<T, E> for Result<Option<T>, E> {
     where F: FnOnce(T) -> Result<Option<T1>, E> {
         match self {
             Ok(Some(v)) => f(v),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err)
+        }
+    }
+
+    fn ro_map<T1, F>(self, f: F) -> Result<Option<T1>, E>
+    where F: FnOnce(T) -> T1 {
+        match self {
+            Ok(Some(v)) => Ok(Some(f(v))),
             Ok(None) => Ok(None),
             Err(err) => Err(err)
         }
