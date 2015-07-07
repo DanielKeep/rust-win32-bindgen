@@ -1,16 +1,68 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate rustc_serialize;
-extern crate env_logger;
+extern crate log4rs;
 extern crate regex;
 extern crate win32_bindgen;
 
 use std::collections::HashMap;
 use win32_bindgen as bg;
 
+const LOGGER_CONFIG_PATH: &'static str = "local/log.toml";
+
 fn main() {
-    env_logger::init().unwrap();
+    println!("Loading logger config...");
+    match logger_config() {
+        Ok(()) => (),
+        Err(err) => {
+            println!("Error loading logging config from {}: {}", LOGGER_CONFIG_PATH, err);
+            println!("Loading defaults instead.");
+            log4rs::init_config(default_logger_config().unwrap()).unwrap();
+        }
+    }
+    println!("Starting...");
     let result = try_main();
     result.unwrap();
+}
+
+fn logger_config() -> Result<(), String> {
+    let _ = try!(std::fs::metadata(LOGGER_CONFIG_PATH).map_err(|e| e.to_string()));
+    log4rs::init_file(LOGGER_CONFIG_PATH, log4rs::toml::Creator::default())
+        .map_err(|e| e.to_string())
+}
+
+fn default_logger_config() -> Result<log4rs::config::Config, log4rs::config::Errors> {
+    use log::LogLevelFilter;
+    use log4rs::{appender, config};
+    use log4rs::pattern::PatternLayout;
+
+    config::Config::builder(
+        config::Root::builder(LogLevelFilter::Info)
+            .appender("stderr".into())
+            .appender("trace-log".into())
+            .build()
+        )
+        .appender(
+            config::Appender::builder(
+                "stderr".into(),
+                Box::new(appender::ConsoleAppender::builder()
+                    .pattern(PatternLayout::default())
+                    .build()
+                )
+            )
+            .build()
+        )
+        .appender(
+            config::Appender::builder(
+                "trace-log".into(),
+                Box::new(appender::FileAppender::builder("err.log")
+                    .pattern(PatternLayout::default())
+                    .append(false)
+                    .build().unwrap()
+                )
+            )
+            .build()
+        )
+        .build()
 }
 
 fn try_main() -> Result<(), String> {
