@@ -7,7 +7,7 @@ use clang::{
 };
 use features::Features;
 
-use super::{EMIT_STUBS, Cache, NameMap, file_stem, name_for_maybe_anon, next_from};
+use super::{EMIT_STUBS, Cache, NameMap, add_to_name_map_checked, file_stem, name_for_maybe_anon, next_from};
 use super::features::get_features_at;
 use super::output::{AbsCallConv, OutputItems};
 use super::renames::Renames;
@@ -26,6 +26,7 @@ pub fn process_decls(
     let mut decl_curs = tu.cursor().children().into_iter();
     let mut deferred: Vec<Cursor> = vec![];
     let mut deferred_iter = None;
+    let mut second_pass = vec![];
 
     while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
         /*
@@ -45,7 +46,16 @@ pub fn process_decls(
                 renames,
                 &mut name_map,
                 &mut |cur| deferred.push(cur),
+                &mut |cur, feats| second_pass.push((cur, feats)),
             );
+        }
+    }
+
+    for (cur, feat) in second_pass {
+        let cur_copy = cur.clone();
+        let result = super::trans_macros::process_macro_defn(cur, output, feat, &mut name_map);
+        if let Err(err) = result {
+            warn!("could-not-translate misc {}: {}", cur_copy, err);
         }
     }
 }
@@ -53,7 +63,7 @@ pub fn process_decls(
 /**
 Processes a single declaration.
 */
-fn process_decl<Defer>(
+fn process_decl<Defer, Pass>(
     decl_cur: Cursor,
     feat_mask: Features,
     native_cc: NativeCallConv,
@@ -62,8 +72,11 @@ fn process_decl<Defer>(
     renames: &Renames,
     name_map: &mut NameMap,
     defer: &mut Defer,
+    pass: &mut Pass,
 )
-where Defer: FnMut(Cursor)
+where
+    Defer: FnMut(Cursor),
+    Pass: FnMut(Cursor, Features),
 {
     use clang::CursorKind as CK;
 
@@ -114,7 +127,7 @@ where Defer: FnMut(Cursor)
         CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, name_map, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, name_map, native_cc),
         CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames, name_map),
-        CK::MacroDefinition => super::trans_macros::process_macro_defn(decl_cur, output, feat, name_map),
+        CK::MacroDefinition => { pass(decl_cur, feat); Ok(()) },
 
         kind => {
             warn!("could-not-translate unsupported {:?} {} at {}",
@@ -163,7 +176,7 @@ where Defer: FnMut(Cursor)
             // There *is no* definition!
             debug!(".. no definition found");
             let decl = format!("#[repr(C)] pub struct {};", name);
-            assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+            try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
             output.add_header_item(name, header, feat, decl, annot);
             return Ok(())
         },
@@ -189,7 +202,7 @@ where Defer: FnMut(Cursor)
                         if EMIT_STUBS {
                             // TODO: just stub for now.
                             let decl = format!("#[repr(C)] pub struct {}; /* ERR STUB! */", name);
-                            assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+                            try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
                             output.add_header_item(name, header, feat, decl, annot);
                         }
                         return Err(err);
@@ -219,7 +232,7 @@ where Defer: FnMut(Cursor)
         )
     };
 
-    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
     output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
@@ -249,7 +262,7 @@ where Defer: FnMut(Cursor)
             name = name,
         );
 
-        assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+        try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
         output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
@@ -280,7 +293,7 @@ where Defer: FnMut(Cursor)
             name = name,
         );
 
-        assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+        try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
         output.add_header_item(name, header, feat, decl, annot);
     }
     Ok(())
@@ -339,7 +352,7 @@ fn process_function_decl(
     );
 
     let annot = decl_cur.location().display_short().to_string();
-    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
     output.add_func_item(name, feat, cconv, decl, annot);
     Ok(())
 }
@@ -364,7 +377,7 @@ fn process_typedef_decl(
     let decl = format!("pub type {} = {};", name, ty);
 
     let annot = decl_cur.location().display_short().to_string();
-    assert!(name_map.insert(name.clone(), decl_cur.clone()).is_none());
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
     output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }

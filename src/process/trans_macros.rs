@@ -1,9 +1,9 @@
 use itertools::Itertools;
 use clang::Cursor;
 use features::Features;
-
 use util::ResultOptionExt;
-use super::{EMIT_STUBS, NameMap, file_stem};
+
+use super::{EMIT_STUBS, NameMap, add_to_name_map_checked, file_stem};
 use super::output::OutputItems;
 
 /**
@@ -61,13 +61,7 @@ pub fn process_macro_defn(
 
     if let Some((v, t)) = try!(try_trans_inty_macro(&exp_ast, name_map)) {
         let decl = format!("pub const {}: {} = {}; /* {:?} */", name, t, v, exp_ast);
-        if !(name_map.insert(name.clone(), defn_cur.clone()).is_none()) {
-            error!("could not insert {} {:?} into name_map:", defn_cur, name);
-            for (n,c) in name_map {
-                error!(".. {:?}: {}", n, c);
-            }
-            assert!(false);
-        }
+        try!(add_to_name_map_checked(name_map, name.clone(), defn_cur.clone()));
         output.add_header_item(name, header, feat, decl, annot);
         return Ok(());
     }

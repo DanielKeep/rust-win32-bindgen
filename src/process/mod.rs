@@ -27,6 +27,21 @@ const EMIT_STUBS: bool = true;
 
 pub type NameMap = HashMap<String, Cursor>;
 
+fn add_to_name_map_checked(map: &mut NameMap, name: String, cur: Cursor) -> Result<(), String> {
+    use std::collections::hash_map::Entry;
+    match map.entry(name.clone()) {
+        Entry::Occupied(e) => {
+            Err(format!("cannot insert {:?} ({}) into name map; already exists as {}",
+                name, cur, e.get()))
+        },
+        Entry::Vacant(e) => {
+            info!("add_to_name_map_checked(_, {:?}, {})", name, cur);
+            e.insert(cur);
+            Ok(())
+        }
+    }
+}
+
 /**
 Bundles together any caches we need for efficiency.
 */
