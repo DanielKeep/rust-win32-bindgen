@@ -3,7 +3,7 @@ use clang::Cursor;
 use features::Features;
 use util::ResultOptionExt;
 
-use super::{EMIT_STUBS, NameMap, add_to_name_map_checked, file_stem, mod_qual};
+use super::{EMIT_STUBS, NameMap, add_to_name_map_checked, escape_ident, file_stem, mod_qual};
 use super::output::OutputItems;
 
 /**
@@ -76,7 +76,7 @@ pub fn process_macro_defn(
             => {
                 // Need the header name and spelling to do the alias.
                 let qual = mod_qual(&decl_cur);
-                let decl = format!("#[doc(inline)] pub use {}{} as {};", qual, s, name);
+                let decl = format!("#[doc(inline)] pub use {}{} as {};", qual, escape_ident(s.clone()), escape_ident(name.clone()));
 
                 // We want to alias to the *original* thing, so that if someone aliases *us*, they know how to make it work.  It saves us from having to preserve this information in the name map itself.
                 try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
@@ -86,7 +86,7 @@ pub fn process_macro_defn(
 
             CK::FunctionDecl => {
                 // We need to make sure we "inherit" the library of the symbol we're aliasing.
-                let decl = format!("#[doc(inline)] pub use self::{} as {};", s, name);
+                let decl = format!("#[doc(inline)] pub use self::{} as {};", escape_ident(s.clone()), escape_ident(name.clone()));
                 try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
                 output.add_func_alias(name, s.clone(), feat, decl, annot);
                 return Ok(())
@@ -100,7 +100,7 @@ pub fn process_macro_defn(
 
     // Check for an "inty" macro expression.
     if let Some((v, t)) = try!(try_trans_inty_macro(&exp_ast, name_map)) {
-        let decl = format!("pub const {}: {} = {}; /* {:?} */", name, t, v, exp_ast);
+        let decl = format!("pub const {}: {} = {}; /* {:?} */", escape_ident(name.clone()), t, v, exp_ast);
         try!(add_to_name_map_checked(name_map, name.clone(), defn_cur.clone()));
         output.add_header_item(name, header, feat, decl, annot);
         return Ok(());
@@ -156,10 +156,10 @@ fn try_trans_inty_macro(node: &::ppmac::Node, name_map: &NameMap) -> Result<Opti
         },
         Node::Integer(v, signed, size) => {
             Ok(Some(match (signed, size) {
-                (Signed::No, Size::Unknown) => (format!("{:x}u32", v), "u32".into()),
-                (Signed::No, Size::Long) => (format!("{:x}u64", v), "u64".into()),
-                (Signed::Yes, Size::Unknown) => (format!("{:x}i32", v as i64), "i32".into()),
-                (Signed::Yes, Size::Long) => (format!("{:x}i64", v as i64), "i64".into()),
+                (Signed::No, Size::Unknown) => (format!("0x{:x}u32", v), "u32".into()),
+                (Signed::No, Size::Long) => (format!("0x{:x}u64", v), "u64".into()),
+                (Signed::Yes, Size::Unknown) => (format!("0x{:x}i32", v as i64), "i32".into()),
+                (Signed::Yes, Size::Long) => (format!("0x{:x}i64", v as i64), "i64".into()),
             }))
         },
         Node::String(ref s, _) => Ok(Some((format!("\"{}\"", s), "&'static str".into()))),

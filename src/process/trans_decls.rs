@@ -7,7 +7,7 @@ use clang::{
 };
 use features::Features;
 
-use super::{EMIT_STUBS, Cache, NameMap, add_to_name_map_checked, file_stem, mod_qual, name_for_maybe_anon, next_from};
+use super::{EMIT_STUBS, Cache, NameMap, add_to_name_map_checked, escape_ident, file_stem, mod_qual, name_for_maybe_anon, next_from};
 use super::features::get_features_at;
 use super::output::{AbsCallConv, OutputItems};
 use super::renames::Renames;
@@ -169,7 +169,7 @@ where Defer: FnMut(Cursor)
         (false, true) => {
             // There *is no* definition!
             debug!(".. no definition found");
-            let decl = format!("#[repr(C)] pub struct {};", name);
+            let decl = format!("#[repr(C)] pub struct {};", escape_ident(name.clone()));
             try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
             output.add_header_item(name, header, feat, decl, annot);
             return Ok(())
@@ -189,20 +189,26 @@ where Defer: FnMut(Cursor)
             },
 
             CK::FieldDecl => {
-                let field_name = child_cur.spelling();
+                let mut field_name = child_cur.spelling();
+
+                // What if the field doesn't have a name?
+                if field_name == "" {
+                    field_name = format!("_field{}", fields.len());
+                }
+
                 let ty = match trans_type(child_cur.type_(), renames) {
                     Ok(ty) => ty,
                     Err(err) => {
                         if EMIT_STUBS {
                             // TODO: just stub for now.
-                            let decl = format!("#[repr(C)] pub struct {}; /* ERR STUB! */", name);
+                            let decl = format!("#[repr(C)] pub struct {}; /* ERR STUB! */", escape_ident(name.clone()));
                             try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
                             output.add_header_item(name, header, feat, decl, annot);
                         }
                         return Err(err);
                     }
                 };
-                fields.push(format!("{}: {}", field_name, ty));
+                fields.push(format!("{}: {}", escape_ident(field_name), ty));
             },
 
             CK::UnexposedAttr => {
@@ -217,11 +223,11 @@ where Defer: FnMut(Cursor)
         // Why did this have to be special-cased? :(
         0 => format!(
             "#[repr(C)] pub struct {name};",
-            name = name,
+            name = escape_ident(name.clone()),
         ),
         _ => format!(
             "#[repr(C)] pub struct {name} {{ {fields} }}",
-            name = name,
+            name = escape_ident(name.clone()),
             fields = fields.connect(", "),
         )
     };
@@ -252,7 +258,7 @@ where Defer: FnMut(Cursor)
     if EMIT_STUBS {
         let decl = format!(
             "#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
-            name = name,
+            name = escape_ident(name.clone()),
         );
 
         try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
@@ -308,13 +314,13 @@ where Defer: FnMut(Cursor)
         }
         let sp = var_cur.spelling();
         let val = var_cur.enum_constant_decl_value();
-        vars.push(format!("{} = {}", sp, val));
+        vars.push(format!("{} = {}", escape_ident(sp), val));
     }
 
     let decl = format!(
         "{repr} pub enum {name} {{{vars}}}",
         repr = base_ty.map(|t| format!("#[repr({})]", t)).unwrap_or_else(|| "#[repr(C)]".into()),
-        name = name,
+        name = escape_ident(name.clone()),
         vars = vars.connect(", "),
     );
 
@@ -370,7 +376,7 @@ fn process_function_decl(
 
     let decl = format!(
         r#"pub fn {name}({arg_tys}){res_ty};"#,
-        name = name,
+        name = escape_ident(name.clone()),
         arg_tys = arg_tys,
         res_ty = res_ty,
     );
@@ -398,7 +404,7 @@ fn process_typedef_decl(
     let ty = decl_cur.typedef_decl_underlying_type();
     let ty = try!(trans_type(ty, renames));
 
-    let decl = format!("pub type {} = {};", name, ty);
+    let decl = format!("pub type {} = {};", escape_ident(name.clone()), ty);
 
     let annot = decl_cur.location().display_short().to_string();
     try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
@@ -419,7 +425,7 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
         Ok(cur) => {
             // Use whatever we've been given and don't look too closely...
             let qual = mod_qual(&cur);
-            return Ok(format!("{}{}", qual, cur.spelling()));
+            return Ok(format!("{}{}", qual, escape_ident(cur.spelling())));
         },
         Err(ty) => ty
     };
@@ -436,25 +442,25 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
         },
 
         // Basic types.
-        TK::Void => Ok("libc::c_void".into()),
-        TK::Char_U | TK::UChar => Ok("libc::c_uchar".into()),
+        TK::Void => Ok("::libc::c_void".into()),
+        TK::Char_U | TK::UChar => Ok("::libc::c_uchar".into()),
         TK::Char16 => Ok("u16".into()),
         // **Note**: *not* `char` because C++ doesn't appear to guarantee that a value of type char32_t is a valid UTF-32 code unit.
         TK::Char32 => Ok("u32".into()),
-        TK::UShort => Ok("libc::c_ushort".into()),
-        TK::UInt => Ok("libc::c_uint".into()),
-        TK::ULong => Ok("libc::c_ulong".into()),
-        TK::ULongLong => Ok("libc::c_ulonglong".into()),
-        TK::Char_S => Ok("libc::c_schar".into()),
-        TK::SChar => Ok("libc::c_schar".into()),
-        TK::WChar => Ok("libc::wchar_t".into()),
-        TK::Short => Ok("libc::c_short".into()),
-        TK::Int => Ok("libc::c_int".into()),
-        TK::Long => Ok("libc::c_long".into()),
-        TK::LongLong => Ok("libc::c_longlong".into()),
-        TK::Float => Ok("libc::c_float".into()),
-        TK::Double => Ok("libc::c_double".into()),
-        TK::NullPtr => Ok("*mut libc::c_void".into()),
+        TK::UShort => Ok("::libc::c_ushort".into()),
+        TK::UInt => Ok("::libc::c_uint".into()),
+        TK::ULong => Ok("::libc::c_ulong".into()),
+        TK::ULongLong => Ok("::libc::c_ulonglong".into()),
+        TK::Char_S => Ok("::libc::c_schar".into()),
+        TK::SChar => Ok("::libc::c_schar".into()),
+        TK::WChar => Ok("::libc::wchar_t".into()),
+        TK::Short => Ok("::libc::c_short".into()),
+        TK::Int => Ok("::libc::c_int".into()),
+        TK::Long => Ok("::libc::c_long".into()),
+        TK::LongLong => Ok("::libc::c_longlong".into()),
+        TK::Float => Ok("::libc::c_float".into()),
+        TK::Double => Ok("::libc::c_double".into()),
+        TK::NullPtr => Ok("*mut ::libc::c_void".into()),
 
         // Constructed types.
         TK::Pointer => {
@@ -470,7 +476,9 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
         => {
             // **Note**: use the decl to avoid const-qualification.  This might not be correct.
             let decl_cur = ty.declaration();
-            Ok(format!("{}{}", mod_qual(&decl_cur), decl_cur.spelling()))
+            let (name, _) = try!(name_for_maybe_anon(&decl_cur, renames));
+            let qual = mod_qual(&decl_cur);
+            Ok(format!("{}{}", qual, escape_ident(name.clone())))
         },
 
         TK::ConstantArray => {

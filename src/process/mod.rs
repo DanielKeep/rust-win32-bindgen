@@ -202,6 +202,29 @@ fn next_from(
     dc.next()
 }
 
+fn escape_ident(ident: String) -> String {
+    let is_bad = match &*ident {
+          "abstract"    | "alignof" | "as"          | "become"      | "box"
+        | "break"       | "const"   | "continue"    | "crate"       | "do"
+        | "else"        | "enum"    | "extern"      | "false"       | "final"
+        | "fn"          | "for"     | "if"          | "impl"        | "in"
+        | "let"         | "loop"    | "macro"       | "match"       | "mod"
+        | "move"        | "mut"     | "offsetof"    | "override"    | "priv"
+        | "proc"        | "pub"     | "pure"        | "ref"         | "return"
+        | "Self"        | "self"    | "sizeof"      | "static"      | "struct"
+        | "super"       | "trait"   | "true"        | "type"        | "typeof"
+        | "unsafe"      | "unsized" | "use"         | "virtual"     | "where"
+        | "while"       | "yield"
+        => true,
+        _ => false
+    };
+    if is_bad {
+        ident + "_"
+    } else {
+        ident
+    }
+}
+
 fn file_stem(cur: &Cursor) -> String {
     cur.location().file().expect("valid file for file_stem").name()
 }
