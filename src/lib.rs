@@ -220,6 +220,11 @@ impl GenConfig {
         if self.dont_ignore_decl_spelling.iter().any(|r| r.is_match(&spelling)) { return false; }
         if self.ignore_decl_spellings.iter().any(|r| r.is_match(&spelling)) { return true; }
 
+        self.should_ignore_from_file(cursor)
+    }
+
+    /// Determines whether or not the declaration at the given `Cursor` should be ignored, based solely on its source file.
+    fn should_ignore_from_file(&self, cursor: &clang::Cursor) -> bool {
         let (file, _, _, _) = cursor.location().file_location();
         let file = file.map(|f| f.to_string()).unwrap_or(String::new());
         if self.ignore_file_paths.iter().any(|r| r.is_match(&file)) { return true; }

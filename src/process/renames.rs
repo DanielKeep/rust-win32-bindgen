@@ -83,7 +83,7 @@ pub fn scan_for_renames(tu: Rc<TranslationUnit>, gen_config: &GenConfig) -> Rena
     let mut deferred_iter = None;
 
     while let Some(decl_cur) = next_from(&mut decl_curs, &mut deferred, &mut deferred_iter) {
-        if !gen_config.should_ignore(&decl_cur) {
+        if !gen_config.should_ignore_from_file(&decl_cur) {
             let rename = scan_decl_for_rename(decl_cur, gen_config, &renames, &mut |cur| deferred.push(cur));
             if let Some((from, to)) = rename {
                 renames.add_rename(from, to);
@@ -133,8 +133,8 @@ where Defer: FnMut(Cursor) {
     let ty_defn = match ty_defn {
         Some(c) => c,
         None => {
-            debug!(".. ignoring; has no definition");
-            return None;
+            // This means we've (probably) got an opaque structure... just roll with it.
+            ty.declaration()
         }
     };
 
