@@ -22,6 +22,7 @@ mod trans_decls;
 mod trans_macros;
 
 use self::output::OutputItems;
+use self::renames::Renames;
 
 const EMIT_STUBS: bool = true;
 
@@ -219,14 +220,21 @@ fn mod_qual(cur: &Cursor) -> String {
 /**
 Works out a name for the given structure, even if it doesn't otherwise *have* one.
 */
-fn name_for_maybe_anon(decl_cur: &Cursor) -> Result<String, String> {
+fn name_for_maybe_anon(decl_cur: &Cursor, renames: &Renames) -> Result<(String, String), String> {
+    // Check to see if this cursor has been renamed...
+    let cur = match renames.rename_decl(&decl_cur) {
+        Ok(cur) => cur,
+        Err(cur) => cur
+    };
+
     // TODO: Use clang_Cursor_isAnonymous once its released.
-    let name = decl_cur.spelling();
+    let name = cur.spelling();
+
     if name == "" {
         /*
         This is *probably* an anonymous type.  We need to give it a name that will be both reasonable *and* stable across invocations.
         */
-        return Err(format!("anonymous-struct {}", decl_cur));
+        return Err(format!("anonymous-struct {}", cur));
     }
-    Ok(name)
+    Ok((name, file_stem(&cur)))
 }

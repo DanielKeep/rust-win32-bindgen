@@ -158,13 +158,7 @@ where Defer: FnMut(Cursor)
 
     debug!("process_struct_decl({}, ..)", decl_cur);
 
-    let (name, header) = match renames.rename_decl(&decl_cur) {
-        Ok(cur) => {
-            debug!(".. was renamed to {}", cur);
-            (cur.spelling(), file_stem(&cur))
-        },
-        Err(cur) => (try!(name_for_maybe_anon(&cur)), file_stem(&cur))
-    };
+    let (name, header) = try!(name_for_maybe_anon(&decl_cur, renames));
     let annot = decl_cur.location().display_short().to_string();
 
     match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
@@ -244,7 +238,7 @@ fn process_union_decl<Defer>(
     decl_cur: Cursor,
     output: &mut OutputItems,
     feat: Features,
-    _renames: &Renames,
+    renames: &Renames,
     name_map: &mut NameMap,
     _defer: &mut Defer,
 ) -> Result<(), String>
@@ -252,8 +246,7 @@ where Defer: FnMut(Cursor)
 {
     debug!("process_union_decl({}, ..)", decl_cur);
 
-    let name = try!(name_for_maybe_anon(&decl_cur));
-    let header = file_stem(&decl_cur);
+    let (name, header) = try!(name_for_maybe_anon(&decl_cur, renames));
     let annot = decl_cur.location().display_short().to_string();
 
     if EMIT_STUBS {
@@ -275,7 +268,7 @@ fn process_enum_decl<Defer>(
     decl_cur: Cursor,
     output: &mut OutputItems,
     feat: Features,
-    _renames: &Renames,
+    renames: &Renames,
     name_map: &mut NameMap,
     _defer: &mut Defer,
 ) -> Result<(), String>
@@ -283,8 +276,7 @@ where Defer: FnMut(Cursor)
 {
     debug!("process_enum_decl({}, ..)", decl_cur);
 
-    let name = try!(name_for_maybe_anon(&decl_cur));
-    let header = file_stem(&decl_cur);
+    let (name, header) = try!(name_for_maybe_anon(&decl_cur, renames));
     let annot = decl_cur.location().display_short().to_string();
 
     if EMIT_STUBS {
