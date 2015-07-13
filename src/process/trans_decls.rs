@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 use {ExpConfig, GenConfig, NativeCallConv};
 use clang::{
@@ -309,6 +310,10 @@ where Defer: FnMut(Cursor)
     };
 
     let mut vars = vec![];
+    let mut var_names = vec![];
+    let mut var_values = HashMap::new();
+    let mut dup_vars = vec![];
+
     for var_cur in decl_cur.children() {
         use clang::CursorKind as CK;
         match var_cur.kind() {
@@ -317,14 +322,29 @@ where Defer: FnMut(Cursor)
         }
         let sp = var_cur.spelling();
         let val = var_cur.enum_constant_decl_value();
-        vars.push(format!("{} = {}", escape_ident(sp), val));
+        if !var_values.contains_key(&val) {
+            let sp = escape_ident(sp);
+            vars.push(format!("{} = {}", sp, val));
+            var_names.push(sp.clone());
+            var_values.insert(val, sp);
+        } else {
+            let real_var = var_values.get(&val).expect("existing enum variant");
+            dup_vars.push(format!(" pub const {0}: {1} = {1}::{2};", escape_ident(sp), name, real_var));
+        }
+    }
+
+    // If there's only one variant, Rust will spit the dummy.  Club it over the head when it's back is turned and hope no one notices.
+    if vars.len() == 1 {
+        vars.push("__SeeGhIssue10292".into());
     }
 
     let decl = format!(
-        "{repr} pub enum {name} {{{vars}}}",
+        "{repr} pub enum {name} {{{vars}}} pub use self::{name}::{{{var_names}}};{dup_vars}",
         repr = base_ty.map(|t| format!("#[repr({})]", t)).unwrap_or_else(|| "#[repr(C)]".into()),
         name = escape_ident(name.clone()),
         vars = vars.connect(", "),
+        var_names = var_names.connect(", "),
+        dup_vars = dup_vars.connect(""),
     );
 
     try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
