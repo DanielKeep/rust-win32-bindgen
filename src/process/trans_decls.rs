@@ -274,20 +274,52 @@ fn process_enum_decl<Defer>(
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
 {
+    use clang::TypeKind as TK;
+
     debug!("process_enum_decl({}, ..)", decl_cur);
 
     let (name, header) = try!(name_for_maybe_anon(&decl_cur, renames));
     let annot = decl_cur.location().display_short().to_string();
 
-    if EMIT_STUBS {
-        let decl = format!(
-            "#[repr(C)] pub enum {name}; /* STUB! */",
-            name = name,
-        );
+    let base_ty = {
+        let ty = decl_cur.enum_decl_integer_type();
+        match ty.kind() {
+            TK::Int => None,
 
-        try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
-        output.add_header_item(name, header, feat, decl, annot);
+            TK::UShort
+            | TK::UInt
+            | TK::ULong
+            | TK::ULongLong
+            | TK::Short
+            | TK::Long
+            | TK::LongLong
+            => Some(try!(trans_type(ty, renames))),
+
+            tyk => return Err(format!("unsupported-enum-base-type kind {:?}", tyk))
+        }
+    };
+
+    let mut vars = vec![];
+    for var_cur in decl_cur.children() {
+        use clang::CursorKind as CK;
+        match var_cur.kind() {
+            CK::EnumConstantDecl => (),
+            _ => continue
+        }
+        let sp = var_cur.spelling();
+        let val = var_cur.enum_constant_decl_value();
+        vars.push(format!("{} = {}", sp, val));
     }
+
+    let decl = format!(
+        "{repr} pub enum {name} {{{vars}}}",
+        repr = base_ty.map(|t| format!("#[repr({})]", t)).unwrap_or_else(|| "#[repr(C)]".into()),
+        name = name,
+        vars = vars.connect(", "),
+    );
+
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
+    output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
 

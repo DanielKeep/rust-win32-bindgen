@@ -368,6 +368,18 @@ impl Cursor {
         }
     }
 
+    pub fn enum_constant_decl_value(&self) -> i64 {
+        unsafe {
+            ll::clang_getEnumConstantDeclValue(self.1)
+        }
+    }
+
+    pub fn enum_decl_integer_type(&self) -> Type {
+        unsafe {
+            Type::from_ll(self.0.clone(), ll::clang_getEnumDeclIntegerType(self.1))
+        }
+    }
+
     pub fn is_definition(&self) -> bool {
         unsafe {
             ll::clang_isCursorDefinition(self.1) != 0
