@@ -138,8 +138,13 @@ fn try_trans_inty_macro(node: &::ppmac::Node, name_map: &NameMap) -> Result<Opti
         Node::Cast { ref ty, ref value } => {
             match **ty {
                 Node::Type(ref name, ptr) => {
+                    // Lookup type name.
+                    let ty_cur = match name_map.get(name) {
+                        Some(decl) => decl,
+                        None => return Err(format!("forward-reference to name {:?}", name))
+                    };
                     let ptr = if ptr { "*mut " } else { "" };
-                    let ty = format!("{}{}", ptr, name);
+                    let ty = format!("{}{}{}", ptr, mod_qual(&ty_cur), name);
                     ttim(value, name_map)
                         .ro_map(|(value, _)| (format!("{} as {}", value, ty), ty))
                 },
