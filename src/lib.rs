@@ -168,6 +168,13 @@ pub struct GenConfig {
     pub switches: Vec<String>,
 
     /**
+    Any declaration whose spelling matches *any* of these regular expressions will *not* be ignored.
+
+    This takes precedence over `ignore_decl_spellings`.
+    */
+    pub dont_ignore_decl_spelling: Vec<Regex>,
+
+    /**
     Any declaration whose spelling matches *any* of these regular expressions will be ignored.  That is, the processor will *not* attempt to generate a Rust binding for it.
     */
     pub ignore_decl_spellings: Vec<Regex>,
@@ -210,6 +217,7 @@ impl GenConfig {
     /// Determines whether or not the declaration at the given `Cursor` should be ignored.
     fn should_ignore(&self, cursor: &clang::Cursor) -> bool {
         let spelling = cursor.spelling();
+        if self.dont_ignore_decl_spelling.iter().any(|r| r.is_match(&spelling)) { return false; }
         if self.ignore_decl_spellings.iter().any(|r| r.is_match(&spelling)) { return true; }
 
         let (file, _, _, _) = cursor.location().file_location();

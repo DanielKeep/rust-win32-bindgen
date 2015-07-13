@@ -89,6 +89,7 @@ pub struct Config {
 #[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
 pub struct GenConfig {
     pub expansion_configs: Vec<ExpConfig>,
+    pub dont_ignore_decl_spelling: Vec<String>,
     pub ignore_decl_spellings: Vec<String>,
     pub ignore_file_paths: Vec<String>,
     pub switches: Vec<String>,
@@ -99,6 +100,7 @@ impl GenConfig {
     pub fn into_gen_config(self) -> bg::GenConfig {
         bg::GenConfig {
             exp_configs: self.expansion_configs.into_iter().map(ExpConfig::into_exp_config).collect(),
+            dont_ignore_decl_spelling: self.dont_ignore_decl_spelling.into_iter().map(|s| re(&s)).collect(),
             ignore_decl_spellings: self.ignore_decl_spellings.into_iter().map(|s| re(&s)).collect(),
             ignore_file_paths: self.ignore_file_paths.into_iter().map(|s| re(&s)).collect(),
             switches: self.switches,
