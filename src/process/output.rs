@@ -39,6 +39,9 @@ Note that `annot` is used for "annotations", which are free-form strings that ma
 pub struct OutputItems {
     next_seq_id: u64,
 
+    /// `[name => [(alias, feat, decl, annot)]]`
+    pub fn_aliases: HashMap<String, Vec<(u64, String, Features, String, String)>>,
+
     /// `[name => [(feat, cconv, decl, annot)]]`
     pub fn_items: HashMap<String, Vec<(u64, Features, AbsCallConv, String, String)>>,
 
@@ -50,9 +53,44 @@ impl OutputItems {
     pub fn new() -> Self {
         OutputItems {
             next_seq_id: 0,
+            fn_aliases: HashMap::new(),
             fn_items: HashMap::new(),
             header_items: HashMap::new(),
         }
+    }
+
+    /**
+    Adds a function alias.
+
+    This is different from a regular function item in that the library is should be emitted to is based on some *other* function which it is aliasing.
+
+    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
+    */
+    pub fn add_func_alias(&mut self, name: String, alias: String, feat: Features, decl: String, annot: String) {
+        use std::mem::replace;
+        debug!("add_func_alias({:?}, {:?}, {:?}, {:?}, {:?})", name, alias, feat, decl, annot);
+
+        let decls = self.fn_aliases.entry(name).or_insert(vec![]);
+
+        // Is there already a decl which is compatible with this one?
+        for &mut (_, ref mut dal, ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+            if *dd == decl && *dal == alias {
+                debug!(".. merging");
+                // The decls are the same.  Just combine the feature sets together.
+                let new_df = replace(df, Features::default()).or(feat);
+                *df = new_df;
+                if *da != annot {
+                    da.push_str(", ");
+                    da.push_str(&annot);
+                }
+                return;
+            }
+        }
+
+        // Add it to the set of decls.
+        debug!(".. adding");
+        decls.push((self.next_seq_id, alias, feat, decl, annot));
+        self.next_seq_id += 1;
     }
 
     /**
@@ -140,11 +178,19 @@ impl<'a> OutputFiles<'a> {
         writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
     }
 
-    pub fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: &AbsCallConv, decl: &str, annot: &str) {
+    pub fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: Option<&AbsCallConv>, decl: &str, annot: &str) {
         use std::io::prelude::*;
         let (file, group) = self.get_file(name, &self.out_config.library_path);
+
+        // Deal with the fact that we might not have a calling convention.  If we've seen one already, just steal that.  Otherwise, assume "system".
+        let cconv = cconv.map(|cc| *cc).unwrap_or_else(|| match *group {
+            Some((_, ref gcc)) => *gcc,
+            None => AbsCallConv::System
+        });
+
+        // Change grouping if necessary.
         match *group {
-            Some((ref gf, ref gcc)) if gf == feat && gcc == cconv => (),
+            Some((ref gf, ref gcc)) if gf == feat && *gcc == cconv => (),
             Some(_) => {
                 writeln!(file, "}}\n{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
             },
@@ -152,8 +198,12 @@ impl<'a> OutputFiles<'a> {
                 writeln!(file, "{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
             }
         }
+
+        // Proceed with output.
         writeln!(file, "    {} /* {} */", decl, annot).unwrap();
-        *group = Some((feat.clone(), cconv.clone()));
+
+        // Update the "last" group.
+        *group = Some((feat.clone(), cconv));
     }
 
     fn get_file<'b>(
@@ -194,7 +244,14 @@ pub fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_conf
     for (name, decls) in &items.fn_items {
         for &(_, ref feat, ref cconv, ref decl, ref annot) in decls {
             for &ref lib in out_config.get_fn_libs(name) {
-                lines.push((lib, feat, name, cconv, decl, annot));
+                lines.push((lib, feat, name, Some(cconv), decl, annot));
+            }
+        }
+    }
+    for (name, decls) in &items.fn_aliases {
+        for &(_, ref alias, ref feat, ref decl, ref annot) in decls {
+            for &ref lib in out_config.get_fn_libs(alias) {
+                lines.push((lib, feat, name, None, decl, annot));
             }
         }
     }

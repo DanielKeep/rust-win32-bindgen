@@ -7,7 +7,7 @@ use clang::{
 };
 use features::Features;
 
-use super::{EMIT_STUBS, Cache, NameMap, add_to_name_map_checked, file_stem, name_for_maybe_anon, next_from};
+use super::{EMIT_STUBS, Cache, NameMap, add_to_name_map_checked, file_stem, mod_qual, name_for_maybe_anon, next_from};
 use super::features::get_features_at;
 use super::output::{AbsCallConv, OutputItems};
 use super::renames::Renames;
@@ -390,17 +390,6 @@ Note that this **is not** for translating type declarations; you cannot just pas
 fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
     use clang::TypeKind as TK;
     debug!("trans_type({:?} {:?}, _)", ty.kind(), ty.spelling());
-
-    /**
-    This works out the module qualifier for a given type.  This is intended to let you put types into files based on their source header.
-    */
-    fn mod_qual(cur: &Cursor) -> String {
-        let file = cur.location().file();
-        match file.map(|f| f.name()) {
-            Some(name) => format!("::{}::", name),
-            None => String::new()
-        }
-    }
 
     let ty = match renames.rename_ty(ty) {
         Ok(cur) => {

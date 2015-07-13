@@ -3,7 +3,7 @@ use clang::Cursor;
 use features::Features;
 use util::ResultOptionExt;
 
-use super::{EMIT_STUBS, NameMap, add_to_name_map_checked, file_stem};
+use super::{EMIT_STUBS, NameMap, add_to_name_map_checked, file_stem, mod_qual};
 use super::output::OutputItems;
 
 /**
@@ -59,6 +59,46 @@ pub fn process_macro_defn(
         }
     };
 
+    // Check for a simple alias macro.
+    if let (false, &::ppmac::Node::Ident(ref s)) = (is_fn_macro, &exp_ast) {
+        use clang::CursorKind as CK;
+
+        let decl_cur = match name_map.get(s) {
+            Some(decl_cur) => decl_cur.clone(),
+            None => return Err(format!("forward-reference to name {:?}", s))
+        };
+        match decl_cur.kind() {
+            CK::StructDecl
+            | CK::UnionDecl
+            | CK::EnumDecl
+            | CK::TypedefDecl
+            | CK::MacroDefinition
+            => {
+                // Need the header name and spelling to do the alias.
+                let qual = mod_qual(&decl_cur);
+                let decl = format!("#[doc(inline)] pub use {}{} as {};", qual, s, name);
+
+                // We want to alias to the *original* thing, so that if someone aliases *us*, they know how to make it work.  It saves us from having to preserve this information in the name map itself.
+                try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
+                output.add_header_item(name, header, feat, decl, annot);
+                return Ok(())
+            },
+
+            CK::FunctionDecl => {
+                // We need to make sure we "inherit" the library of the symbol we're aliasing.
+                let decl = format!("#[doc(inline)] pub use self::{} as {};", s, name);
+                try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
+                output.add_func_alias(name, s.clone(), feat, decl, annot);
+                return Ok(())
+            },
+
+            _ => {
+                return Err(format!("unsupported-alias-target to {:?}, {}", s, decl_cur));
+            }
+        }
+    }
+
+    // Check for an "inty" macro expression.
     if let Some((v, t)) = try!(try_trans_inty_macro(&exp_ast, name_map)) {
         let decl = format!("pub const {}: {} = {}; /* {:?} */", name, t, v, exp_ast);
         try!(add_to_name_map_checked(name_map, name.clone(), defn_cur.clone()));

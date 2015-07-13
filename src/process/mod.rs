@@ -25,6 +25,8 @@ use self::output::OutputItems;
 
 const EMIT_STUBS: bool = true;
 
+// TODO: Make NameMap a proper type.
+
 pub type NameMap = HashMap<String, Cursor>;
 
 fn add_to_name_map_checked(map: &mut NameMap, name: String, cur: Cursor) -> Result<(), String> {
@@ -201,6 +203,17 @@ fn next_from(
 
 fn file_stem(cur: &Cursor) -> String {
     cur.location().file().expect("valid file for file_stem").name()
+}
+
+/**
+This works out the module qualifier for a given type.  This is intended to let you put types into files based on their source header.
+*/
+fn mod_qual(cur: &Cursor) -> String {
+    let file = cur.location().file();
+    match file.map(|f| f.name()) {
+        Some(name) => format!("::{}::", name),
+        None => String::new()
+    }
 }
 
 /**
