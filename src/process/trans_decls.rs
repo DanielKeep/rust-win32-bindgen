@@ -122,11 +122,11 @@ where
         | CK::MacroInstantiation
         => unreachable!(),
 
-        CK::StructDecl => process_struct_decl(decl_cur, output, feat, renames, name_map, defer),
-        CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, name_map, defer),
-        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, name_map, defer),
+        CK::StructDecl => process_struct_decl(decl_cur, output, feat, renames, name_map, native_cc, defer),
+        CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, name_map, native_cc, defer),
+        CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, name_map, native_cc, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, name_map, native_cc),
-        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames, name_map),
+        CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames, name_map, native_cc),
         CK::MacroDefinition => { pass(decl_cur, feat); Ok(()) },
 
         kind => {
@@ -150,6 +150,7 @@ fn process_struct_decl<Defer>(
     feat: Features,
     renames: &Renames,
     name_map: &mut NameMap,
+    native_cc: NativeCallConv,
     defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -196,7 +197,7 @@ where Defer: FnMut(Cursor)
                     field_name = format!("_field{}", fields.len());
                 }
 
-                let ty = match trans_type(child_cur.type_(), renames) {
+                let ty = match trans_type(child_cur.type_(), renames, native_cc) {
                     Ok(ty) => ty,
                     Err(err) => {
                         if EMIT_STUBS {
@@ -246,6 +247,7 @@ fn process_union_decl<Defer>(
     feat: Features,
     renames: &Renames,
     name_map: &mut NameMap,
+    _native_cc: NativeCallConv,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -276,6 +278,7 @@ fn process_enum_decl<Defer>(
     feat: Features,
     renames: &Renames,
     name_map: &mut NameMap,
+    native_cc: NativeCallConv,
     _defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
@@ -299,7 +302,7 @@ where Defer: FnMut(Cursor)
             | TK::Short
             | TK::Long
             | TK::LongLong
-            => Some(try!(trans_type(ty, renames))),
+            => Some(try!(trans_type(ty, renames, native_cc))),
 
             tyk => return Err(format!("unsupported-enum-base-type kind {:?}", tyk))
         }
@@ -368,10 +371,10 @@ fn process_function_decl(
     let res_ty = if ty.result().kind() == clang::TypeKind::Void {
         String::new()
     } else {
-        format!(" -> {}", try!(trans_type(ty.result(), renames)))
+        format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
     };
 
-    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames)).collect());
+    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
     let arg_tys = arg_tys.connect(", ");
 
     let decl = format!(
@@ -396,13 +399,14 @@ fn process_typedef_decl(
     feat: Features,
     renames: &Renames,
     name_map: &mut NameMap,
+    native_cc: NativeCallConv,
 ) -> Result<(), String> {
     debug!("process_typedef_decl({}, ..)", decl_cur);
     let name = decl_cur.spelling();
     let header = file_stem(&decl_cur);
 
     let ty = decl_cur.typedef_decl_underlying_type();
-    let ty = try!(trans_type(ty, renames));
+    let ty = try!(trans_type(ty, renames, native_cc));
 
     let decl = format!("pub type {} = {};", escape_ident(name.clone()), ty);
 
@@ -417,7 +421,7 @@ Translate a type into an equivalent Rust type reference.
 
 Note that this **is not** for translating type declarations; you cannot just pass a structure definition.
 */
-fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
+fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> Result<String, String> {
     use clang::TypeKind as TK;
     debug!("trans_type({:?} {:?}, _)", ty.kind(), ty.spelling());
 
@@ -437,7 +441,7 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
             let canon_ty = ty.canonical();
             match canon_ty.kind() {
                 TK::Unexposed => Err(format!("recursively unexposed type {}", canon_ty.spelling())),
-                _ => trans_type(canon_ty, renames)
+                _ => trans_type(canon_ty, renames, native_cc)
             }
         },
 
@@ -467,7 +471,7 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
             // We want to know whether the thing we're pointing to is const or not.
             let pointee_ty = ty.pointee();
             let mut_ = if pointee_ty.is_const_qualified() { "const" } else { "mut" };
-            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty, renames))))
+            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty, renames, native_cc))))
         },
 
         TK::Record
@@ -485,13 +489,45 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
             let elem_ty = ty.array_element_type();
             let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
             let len = ty.array_size();
-            Ok(format!("*{} [{}; {}]", mut_, try!(trans_type(elem_ty, renames)), len))
+            Ok(format!("*{} [{}; {}]", mut_, try!(trans_type(elem_ty, renames, native_cc)), len))
         },
 
         TK::IncompleteArray => {
             let elem_ty = ty.array_element_type();
             let mut_ = if elem_ty.is_const_qualified() { "const" } else { "mut" };
-            Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty, renames))))
+            Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty, renames, native_cc))))
+        },
+
+        TK::FunctionProto => {
+            use clang::CallingConv as CC;
+            use ::NativeCallConv as NCC;
+
+            let cconv = match (ty.calling_conv(), native_cc) {
+                (CC::C, NCC::C) => AbsCallConv::System,
+                (CC::C, _) => AbsCallConv::ExplicitlyC,
+                (CC::X86StdCall, NCC::Stdcall) => AbsCallConv::System,
+                (cconv, _) => {
+                    return Err(format!("bad-cconv {:?}", cconv));
+                }
+            };
+
+            let res_ty = if ty.result().kind() == clang::TypeKind::Void {
+                String::new()
+            } else {
+                format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
+            };
+
+            let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
+            let arg_tys = arg_tys.connect(", ");
+
+            let rty = format!(
+                r#"extern {cconv:?} fn ({arg_tys}){res_ty}"#,
+                cconv = cconv.as_str(),
+                arg_tys = arg_tys,
+                res_ty = res_ty,
+            );
+
+            Ok(rty)
         },
 
         // **Note**: This isn't currently in `libc`, and does *not* have a platform-independent definition.
@@ -511,7 +547,6 @@ fn trans_type(ty: clang::Type, renames: &Renames) -> Result<String, String> {
         | TK::ObjCInterface
         | TK::ObjCObjectPointer
         | TK::FunctionNoProto
-        | TK::FunctionProto
         | TK::Vector
         | TK::VariableArray
         | TK::DependentSizedArray
