@@ -257,6 +257,31 @@ fn name_for_maybe_anon(decl_cur: &Cursor, renames: &Renames) -> Result<(String, 
         /*
         This is *probably* an anonymous type.  We need to give it a name that will be both reasonable *and* stable across invocations.
         */
+
+        /*
+        First, we will try to give this type a name derived from its parent, assuming it is, in fact, defined *within* something else.
+
+        The name will be of the form `{parent}_Child_{i}`, where `{parent}` is the name of the parent type, and `{i}` is the number of steps it takes to arrive back at this declaration's cursor.
+        */
+        if let Some(par_cur) = cur.lexical_parent() {
+            use clang::CursorKind as CK;
+            if match par_cur.kind() {
+                CK::StructDecl | CK::UnionDecl => true,
+                _ => false
+            } {
+                let (par_name, _) = try!(name_for_maybe_anon(&par_cur, renames));
+                for (i, child_cur) in par_cur.children().into_iter().enumerate() {
+                    if child_cur == *cur {
+                        let name = format!("{}_Child_{}", par_name, i);
+                        return Ok((name, file_stem(&cur)));
+                    }
+                }
+            }
+        }
+
+        /*
+        We're out of ideas; give up.
+        */
         return Err(format!("anonymous-struct {}", cur));
     }
     Ok((name, file_stem(&cur)))

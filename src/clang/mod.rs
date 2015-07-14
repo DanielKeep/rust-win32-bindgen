@@ -398,6 +398,12 @@ impl Cursor {
         }
     }
 
+    pub fn lexical_parent(&self) -> Option<Cursor> {
+        unsafe {
+            Cursor::from_ll(ll::clang_getCursorLexicalParent(self.1))
+        }
+    }
+
     pub fn location(&self) -> SourceLocation {
         unsafe {
             SourceLocation::from_ll(self.0.clone(), ll::clang_getCursorLocation(self.1))
