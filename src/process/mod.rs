@@ -170,9 +170,10 @@ pub fn process_header(path: &str, gen_config: &GenConfig, out_config: &OutConfig
     }
 
     info!("generating output...");
-    let out_files = &mut output::OutputFiles::new(out_config);
-    output::output_header_items(&out_items, out_files);
-    output::output_func_items(&out_items, out_files, out_config);
+    let mut out_files = output::OutputFiles::new(out_config);
+    output::output_header_items(&out_items, &mut out_files);
+    output::output_func_items(&out_items, &mut out_files, out_config);
+    out_files.finish_output();
 
     info!("sanity-checking features...");
     sanity::sanity_check_features(&mut cache);

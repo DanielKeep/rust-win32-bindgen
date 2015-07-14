@@ -214,32 +214,51 @@ impl<'a> OutputFiles<'a> {
         writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
     }
 
-    pub fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: Option<&AbsCallConv>, decl: &str, annot: &str) {
+    pub fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: Option<AbsCallConv>, decl: &str, annot: &str) {
         use std::io::prelude::*;
         let (file, group) = self.get_file(name, &self.out_config.library_path);
 
-        // Deal with the fact that we might not have a calling convention.  If we've seen one already, just steal that.  Otherwise, assume "system".
-        let cconv = cconv.map(|cc| *cc).unwrap_or_else(|| match *group {
-            Some((_, ref gcc)) => *gcc,
-            None => AbsCallConv::System
-        });
+        if let Some(cconv) = cconv {
+            // Change grouping if necessary.
+            match *group {
+                Some((ref gf, ref gcc)) if gf == feat && *gcc == cconv => (),
+                Some(_) => {
+                    writeln!(file, "}}\n{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
+                },
+                None => {
+                    writeln!(file, "{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
+                }
+            }
 
-        // Change grouping if necessary.
-        match *group {
-            Some((ref gf, ref gcc)) if gf == feat && *gcc == cconv => (),
-            Some(_) => {
-                writeln!(file, "}}\n{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
-            },
-            None => {
-                writeln!(file, "{}\nextern {:?} {{", feat, cconv.as_str()).unwrap();
+            // Proceed with output.
+            writeln!(file, "    {} /* {} */", decl, annot).unwrap();
+
+            // Update the "last" group.
+            *group = Some((feat.clone(), cconv));
+        } else {
+            if group.is_some() {
+                writeln!(file, "}}").unwrap();
+            }
+            writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
+            *group = None;
+        }
+    }
+
+    /**
+    Finishes output to all open files.
+
+    This includes things like closing `extern` blocks.
+    */
+    pub fn finish_output(self) {
+        use std::io::prelude::*;
+        debug!("finish_output()");
+
+        for (_, (mut file, group)) in self.files.into_iter() {
+            match group {
+                Some(_) => writeln!(file, "}}").unwrap(),
+                None => ()
             }
         }
-
-        // Proceed with output.
-        writeln!(file, "    {} /* {} */", decl, annot).unwrap();
-
-        // Update the "last" group.
-        *group = Some((feat.clone(), cconv));
     }
 
     fn get_file<'b>(
@@ -280,7 +299,7 @@ pub fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_conf
     for (name, decls) in &items.fn_items {
         for &(_, ref feat, ref cconv, ref decl, ref annot) in decls {
             for &ref lib in out_config.get_fn_libs(name) {
-                lines.push((lib, feat, name, Some(cconv), decl, annot));
+                lines.push((lib, feat, name, Some(*cconv), decl, annot));
             }
         }
     }
@@ -294,7 +313,7 @@ pub fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_conf
     for (name, decls) in &items.var_items {
         for &(_, ref feat, ref decl, ref annot) in decls {
             for &ref lib in out_config.get_fn_libs(name) {
-                lines.push((lib, feat, name, None, decl, annot));
+                lines.push((lib, feat, name, Some(AbsCallConv::System), decl, annot));
             }
         }
     }
