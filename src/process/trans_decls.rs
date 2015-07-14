@@ -530,7 +530,10 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
             Ok(format!("*{} {}", mut_, try!(trans_type(elem_ty, renames, native_cc))))
         },
 
-        TK::FunctionProto => {
+        TK::FunctionProto
+        // HACK: I don't actually *know* what a "FunctionNoProto" is for.
+        | TK::FunctionNoProto
+         => {
             use clang::CallingConv as CC;
             use ::NativeCallConv as NCC;
 
@@ -578,7 +581,6 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
         | TK::RValueReference
         | TK::ObjCInterface
         | TK::ObjCObjectPointer
-        | TK::FunctionNoProto
         | TK::Vector
         | TK::VariableArray
         | TK::DependentSizedArray
