@@ -500,9 +500,21 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
         => {
             // **Note**: use the decl to avoid const-qualification.  This might not be correct.
             let decl_cur = ty.declaration();
-            let (name, _) = try!(name_for_maybe_anon(&decl_cur, renames));
-            let qual = mod_qual(&decl_cur);
-            Ok(format!("{}{}", qual, escape_ident(name.clone())))
+
+            /*
+            Ok, so we might actually have a struct that is *never defined*.  At all.  Anywhere.  No, not even as an opaque type.  It just shows up out of *nowhere*.
+
+            *Sigh*.
+
+            We need to detect this situation and just replace it with `::libc::c_void`.
+            */
+            if decl_cur.definition().is_none() {
+                Ok("::libc::c_void".into())
+            } else {
+                let (name, _) = try!(name_for_maybe_anon(&decl_cur, renames));
+                let qual = mod_qual(&decl_cur);
+                Ok(format!("{}{}", qual, escape_ident(name.clone())))
+            }
         },
 
         TK::ConstantArray => {
