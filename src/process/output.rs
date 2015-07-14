@@ -211,7 +211,11 @@ impl<'a> OutputFiles<'a> {
     pub fn emit_to_header(&mut self, name: &str, feat: &Features, decl: &str, annot: &str) {
         use std::io::prelude::*;
         let (file, _) = self.get_file(name, &self.out_config.header_path);
-        writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
+        if !decl.starts_with("//") {
+            writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
+        } else {
+            writeln!(file, "/* {}{} */ /* {} */", feat, decl, annot).unwrap();
+        }
     }
 
     pub fn emit_to_library(&mut self, name: &str, feat: &Features, cconv: Option<AbsCallConv>, decl: &str, annot: &str) {
