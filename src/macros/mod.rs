@@ -36,6 +36,12 @@ macro_rules! c_enum {
             }
         }
 
+        impl From<$base_ty> for $name {
+            fn from(v: $base_ty) -> $name {
+                TryFrom::try_from(v).unwrap()
+            }
+        }
+
         impl From<$name> for $base_ty {
             fn from(v: $name) -> $base_ty {
                 match v {

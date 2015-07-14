@@ -21,7 +21,7 @@ extern crate libc;
 extern crate num;
 extern crate regex;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use regex::Regex;
 use features::Features;
 
@@ -175,6 +175,11 @@ pub struct GenConfig {
     pub dont_ignore_decl_spelling: Vec<Regex>,
 
     /**
+    Any declaration that matches *any* of these will be ignored.
+    */
+    pub ignore_decls: HashSet<(String, clang::CursorKind, String)>,
+
+    /**
     Any declaration whose spelling matches *any* of these regular expressions will be ignored.  That is, the processor will *not* attempt to generate a Rust binding for it.
     */
     pub ignore_decl_spellings: Vec<Regex>,
@@ -217,10 +222,23 @@ impl GenConfig {
     /// Determines whether or not the declaration at the given `Cursor` should be ignored.
     fn should_ignore(&self, cursor: &clang::Cursor) -> bool {
         let spelling = cursor.spelling();
+
+        // Try an exact match.
+        if let Some(file_stem) = cursor.location().file().map(|f| f.name()) {
+            let key = (file_stem, cursor.kind(), spelling.clone());
+            if self.ignore_decls.contains(&key) { return true; }
+        }
+
+        // Check the file.
+        let file = cursor.location().file();
+        let file = file.map(|f| f.to_string()).unwrap_or(String::new());
+        if self.ignore_file_paths.iter().any(|r| r.is_match(&file)) { return true; }
+
+        // Try a spelling-only regex match.
         if self.dont_ignore_decl_spelling.iter().any(|r| r.is_match(&spelling)) { return false; }
         if self.ignore_decl_spellings.iter().any(|r| r.is_match(&spelling)) { return true; }
 
-        self.should_ignore_from_file(cursor)
+        false
     }
 
     /// Determines whether or not the declaration at the given `Cursor` should be ignored, based solely on its source file.

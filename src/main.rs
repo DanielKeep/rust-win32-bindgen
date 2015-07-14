@@ -90,6 +90,7 @@ pub struct Config {
 pub struct GenConfig {
     pub expansion_configs: Vec<ExpConfig>,
     pub dont_ignore_decl_spelling: Vec<String>,
+    pub ignore_decls: Vec<(String, u32, String)>,
     pub ignore_decl_spellings: Vec<String>,
     pub ignore_file_paths: Vec<String>,
     pub switches: Vec<String>,
@@ -101,6 +102,7 @@ impl GenConfig {
         bg::GenConfig {
             exp_configs: self.expansion_configs.into_iter().map(ExpConfig::into_exp_config).collect(),
             dont_ignore_decl_spelling: self.dont_ignore_decl_spelling.into_iter().map(|s| re(&s)).collect(),
+            ignore_decls: self.ignore_decls.into_iter().map(|(f,k,s)| (f,k.into(),s)).collect(),
             ignore_decl_spellings: self.ignore_decl_spellings.into_iter().map(|s| re(&s)).collect(),
             ignore_file_paths: self.ignore_file_paths.into_iter().map(|s| re(&s)).collect(),
             switches: self.switches,

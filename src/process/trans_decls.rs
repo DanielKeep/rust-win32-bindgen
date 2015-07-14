@@ -456,11 +456,38 @@ fn process_typedef_decl(
     name_map: &mut NameMap,
     native_cc: NativeCallConv,
 ) -> Result<(), String> {
+    use clang::TypeKind as TK;
+
     debug!("process_typedef_decl({}, ..)", decl_cur);
     let name = decl_cur.spelling();
     let header = file_stem(&decl_cur);
 
     let ty = decl_cur.typedef_decl_underlying_type();
+
+    // Resolve unexposed types if possible.
+    let ty = match ty.kind() {
+        TK::Unexposed => ty.canonical(),
+        _ => ty
+    };
+
+    /*
+    Because of how we translate structures, we might run into a typedef of a struct from its canonical name *to* its canonical name.  We need to detect this and just *omit* the typedef.
+    */
+    {
+        let typedef_is_redundant = match ty.kind() {
+            TK::Record | TK::Enum => {
+                let ty_decl = ty.declaration();
+                name == ty_decl.spelling() && header == file_stem(&ty_decl)
+            },
+            _ => false,
+        };
+
+        if typedef_is_redundant {
+            debug!(".. skipping redundant typedef {}", decl_cur);
+            return Ok(());
+        }
+    }
+
     let ty = try!(trans_type(ty, renames, native_cc));
 
     let decl = format!("pub type {} = {};", escape_ident(name.clone()), ty);

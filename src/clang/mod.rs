@@ -197,7 +197,7 @@ impl Drop for IndexAction {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ErrorCode {
     UnknownError,
     Failure,
@@ -492,7 +492,7 @@ impl ::std::hash::Hash for Cursor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u32)]
 pub enum VisitAction {
     Break = ll::CXChildVisit_Break,
@@ -506,14 +506,14 @@ impl From<VisitAction> for ll::Enum_CXChildVisitResult {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum VisitTermination {
     Normal,
     Early,
 }
 
 c_enum! {
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
     pub enum CursorKind: ll::Enum_CXCursorKind {
         UnexposedDecl = 1,
         StructDecl = 2,
@@ -938,7 +938,7 @@ impl Type {
 
 c_enum! {
     #[allow(non_camel_case_types)]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
     pub enum CallingConv: ll::Enum_CXCallingConv {
         Default = 0,
         C = 1,
@@ -959,7 +959,7 @@ c_enum! {
 
 c_enum! {
     #[allow(non_camel_case_types)]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
     pub enum TypeKind: ll::Enum_CXTypeKind {
         Invalid = 0,
         Unexposed = 1,
