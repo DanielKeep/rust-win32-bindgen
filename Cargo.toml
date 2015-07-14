@@ -1,0 +1,52 @@
+[package]
+name = "winapi"
+version = "0.0.1"
+authors = ["Daniel Keep <daniel.keep@gmail.com>"]
+
+[lib]
+name = "winapi"
+path = "lib.rs"
+
+[[bin]]
+name = "hello"
+path = "hello.rs"
+
+[dependencies]
+libc = "*"
+
+[features]
+default = [
+    "winapi_app",
+    "winapi_desktop",
+    "winapi_ver_0A000000",
+]
+
+winapi_app = []
+winapi_desktop = []
+
+winapi_ver_04000000 = []
+winapi_ver_05000000 = ["winapi_ver_04000000"]
+winapi_ver_05000100 = ["winapi_ver_05000000"]
+winapi_ver_05000200 = ["winapi_ver_05000100"]
+winapi_ver_05000300 = ["winapi_ver_05000200"]
+winapi_ver_05000400 = ["winapi_ver_05000300"]
+winapi_ver_05010000 = ["winapi_ver_05000400"]
+winapi_ver_05010100 = ["winapi_ver_05010000"]
+winapi_ver_05010200 = ["winapi_ver_05010100"]
+winapi_ver_05010300 = ["winapi_ver_05010200"]
+winapi_ver_05010400 = ["winapi_ver_05010300"]
+winapi_ver_05020000 = ["winapi_ver_05010400"]
+winapi_ver_05020100 = ["winapi_ver_05020000"]
+winapi_ver_05020200 = ["winapi_ver_05020100"]
+winapi_ver_05020300 = ["winapi_ver_05020200"]
+winapi_ver_05020400 = ["winapi_ver_05020300"]
+winapi_ver_06000000 = ["winapi_ver_05020400"]
+winapi_ver_06000100 = ["winapi_ver_06000000"]
+winapi_ver_06000200 = ["winapi_ver_06000100"]
+winapi_ver_06000300 = ["winapi_ver_06000200"]
+winapi_ver_06000400 = ["winapi_ver_06000300"]
+winapi_ver_06010000 = ["winapi_ver_06000400"]
+winapi_ver_06010100 = ["winapi_ver_06010000"]
+winapi_ver_06020000 = ["winapi_ver_06010100"]
+winapi_ver_06030000 = ["winapi_ver_06020000"]
+winapi_ver_0A000000 = ["winapi_ver_06030000"]

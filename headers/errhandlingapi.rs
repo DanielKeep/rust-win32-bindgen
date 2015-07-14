@@ -1,0 +1,2 @@
+#[cfg(feature="winapi_desktop")] pub type PTOP_LEVEL_EXCEPTION_FILTER = extern "system" fn(*mut ::winnt::EXCEPTION_POINTERS) -> ::libc::c_long; /* errhandlingapi.h:52:23, errhandlingapi.h:52:23, errhandlingapi.h:52:23 */
+#[cfg(feature="winapi_desktop")] pub type LPTOP_LEVEL_EXCEPTION_FILTER = ::errhandlingapi::PTOP_LEVEL_EXCEPTION_FILTER; /* errhandlingapi.h:56:37, errhandlingapi.h:56:37, errhandlingapi.h:56:37 */
