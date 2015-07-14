@@ -489,9 +489,14 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
         // Constructed types.
         TK::Pointer => {
             // We want to know whether the thing we're pointing to is const or not.
-            let pointee_ty = ty.pointee();
+            let pointee_ty = ty.canonical().pointee();
             let mut_ = if pointee_ty.is_const_qualified() { "const" } else { "mut" };
-            Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty, renames, native_cc))))
+
+            // If we're pointing at a function type, we *do not* want to emit a pointer at all.
+            match pointee_ty.kind() {
+                TK::FunctionProto | TK::FunctionNoProto => trans_type(pointee_ty, renames, native_cc),
+                _ => Ok(format!("*{} {}", mut_, try!(trans_type(pointee_ty, renames, native_cc))))
+            }
         },
 
         TK::Record
@@ -556,7 +561,7 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
             let arg_tys = arg_tys.connect(", ");
 
             let rty = format!(
-                r#"extern {cconv:?} fn ({arg_tys}){res_ty}"#,
+                r#"extern {cconv:?} fn({arg_tys}){res_ty}"#,
                 cconv = cconv.as_str(),
                 arg_tys = arg_tys,
                 res_ty = res_ty,
