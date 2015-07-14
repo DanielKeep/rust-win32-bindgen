@@ -127,6 +127,7 @@ where
         CK::UnionDecl => process_union_decl(decl_cur, output, feat, renames, name_map, native_cc, defer),
         CK::EnumDecl => process_enum_decl(decl_cur, output, feat, renames, name_map, native_cc, defer),
         CK::FunctionDecl => process_function_decl(decl_cur, output, feat, renames, name_map, native_cc),
+        CK::VarDecl => process_var_decl(decl_cur, output, feat, renames, name_map, native_cc),
         CK::TypedefDecl => process_typedef_decl(decl_cur, output, feat, renames, name_map, native_cc),
         CK::MacroDefinition => { pass(decl_cur, feat); Ok(()) },
 
@@ -407,6 +408,40 @@ fn process_function_decl(
     let annot = decl_cur.location().display_short().to_string();
     try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
     output.add_func_item(name, feat, cconv, decl, annot);
+    Ok(())
+}
+
+/**
+Process a single variable declaration.
+*/
+fn process_var_decl(
+    decl_cur: Cursor,
+    output: &mut OutputItems,
+    feat: Features,
+    renames: &Renames,
+    name_map: &mut NameMap,
+    native_cc: NativeCallConv
+) -> Result<(), String> {
+    debug!("process_var_decl({}, _)", decl_cur);
+
+    let name = decl_cur.spelling();
+
+    // TODO: Check linkage.
+
+    let ty = decl_cur.type_();
+    let is_mut = !ty.is_const_qualified();
+    let tys = try!(trans_type(ty, renames, native_cc));
+
+    let decl = format!(
+        "pub static {is_mut}{name}: {ty};",
+        is_mut = if is_mut { "mut " } else { "" },
+        name = escape_ident(name.clone()),
+        ty = tys,
+    );
+
+    let annot = decl_cur.location().display_short().to_string();
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
+    output.add_var_item(name, feat, decl, annot);
     Ok(())
 }
 

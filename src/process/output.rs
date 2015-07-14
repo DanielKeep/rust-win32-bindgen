@@ -47,6 +47,9 @@ pub struct OutputItems {
 
     /// `[name => [(header, feat, decl, annot)]]`
     pub header_items: HashMap<String, Vec<(u64, String, Features, String, String)>>,
+
+    /// `[name => [(feat, decl, annot)]]`
+    pub var_items: HashMap<String, Vec<(u64, Features, String, String)>>,
 }
 
 impl OutputItems {
@@ -56,6 +59,7 @@ impl OutputItems {
             fn_aliases: HashMap::new(),
             fn_items: HashMap::new(),
             header_items: HashMap::new(),
+            var_items: HashMap::new(),
         }
     }
 
@@ -152,6 +156,38 @@ impl OutputItems {
         // Add it to the set of decls.
         debug!(".. adding");
         decls.push((self.next_seq_id, header, feat, decl, annot));
+        self.next_seq_id += 1;
+    }
+
+    /**
+    Adds a variable declaration.
+
+    If the given `decl` matches an already existing `decl` with the same `name`, the existing entry will have its feature set unioned with `feat`, and `annot` appended to its annotation.
+    */
+    pub fn add_var_item(&mut self, name: String, feat: Features, decl: String, annot: String) {
+        use std::mem::replace;
+        debug!("add_var_item({:?}, {:?}, {:?}, {:?})", name, feat, decl, annot);
+
+        let decls = self.var_items.entry(name).or_insert(vec![]);
+
+        // Is there already a decl which is compatible with this one?
+        for &mut (_, ref mut df, ref dd, ref mut da) in decls.iter_mut() {
+            if *dd == decl {
+                debug!(".. merging");
+                // The decls are the same.  Just combine the feature sets together.
+                let new_df = replace(df, Features::default()).or(feat);
+                *df = new_df;
+                if *da != annot {
+                    da.push_str(", ");
+                    da.push_str(&annot);
+                }
+                return;
+            }
+        }
+
+        // Add it to the set of decls.
+        debug!(".. adding");
+        decls.push((self.next_seq_id, feat, decl, annot));
         self.next_seq_id += 1;
     }
 }
@@ -251,6 +287,13 @@ pub fn output_func_items(items: &OutputItems, output: &mut OutputFiles, out_conf
     for (name, decls) in &items.fn_aliases {
         for &(_, ref alias, ref feat, ref decl, ref annot) in decls {
             for &ref lib in out_config.get_fn_libs(alias) {
+                lines.push((lib, feat, name, None, decl, annot));
+            }
+        }
+    }
+    for (name, decls) in &items.var_items {
+        for &(_, ref feat, ref decl, ref annot) in decls {
+            for &ref lib in out_config.get_fn_libs(name) {
                 lines.push((lib, feat, name, None, decl, annot));
             }
         }

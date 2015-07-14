@@ -13,4 +13,7 @@ do
     cat $LIB \
     | grep -Po '(?<=// pub fn )[A-Za-z0-9_]+' \
     | sed -re 's/^([A-Za-z0-9_]+)$/\1: '"$LIBNAME"'/'
+    cat $LIB \
+    | grep -Po '(?<=// pub static )[A-Za-z0-9_]+' \
+    | sed -re 's/^([A-Za-z0-9_]+)$/\1: '"$LIBNAME"'/'
 done
