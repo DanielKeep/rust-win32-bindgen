@@ -395,7 +395,11 @@ fn process_function_decl(
         format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
     };
 
-    let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
+    let arg_tys: Vec<String> = try!(ty.args().into_iter()
+        .map(|ty| -> Result<_, String> {
+            Ok(format!("_: {}", try!(trans_type(ty, renames, native_cc))))
+        })
+        .collect());
     let arg_tys = arg_tys.connect(", ");
 
     let decl = format!(
