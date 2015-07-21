@@ -365,6 +365,7 @@ fn process_function_decl(
     native_cc: NativeCallConv
 ) -> Result<(), String> {
     use clang::CallingConv as CC;
+    use clang::CursorKind as CK;
     use ::NativeCallConv as NCC;
 
     debug!("process_function_decl({}, _)", decl_cur);
@@ -395,17 +396,21 @@ fn process_function_decl(
         format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
     };
 
-    let arg_tys: Vec<String> = try!(ty.args().into_iter()
-        .map(|ty| -> Result<_, String> {
-            Ok(format!("_: {}", try!(trans_type(ty, renames, native_cc))))
+    let args: Vec<_> = try!(decl_cur.children().into_iter()
+        .filter(|cur| cur.kind() == CK::ParmDecl)
+        .map(|cur| -> Result<_, String> {
+            let name = escape_ident(cur.spelling());
+            let name = if name != "" { name } else { String::from("_") };
+            let ty = try!(trans_type(cur.type_(), renames, native_cc));
+            Ok(format!("{}: {}", name, ty))
         })
         .collect());
-    let arg_tys = arg_tys.join(", ");
+    let args = args.join(", ");
 
     let decl = format!(
-        r#"pub fn {name}({arg_tys}){res_ty};"#,
+        r#"pub fn {name}({args}){res_ty};"#,
         name = escape_ident(name.clone()),
-        arg_tys = arg_tys,
+        args = args,
         res_ty = res_ty,
     );
 
