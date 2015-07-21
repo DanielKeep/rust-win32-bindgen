@@ -4,6 +4,7 @@ Miscellaneous utility code.
 use std::ffi::CString;
 use std::fs;
 use std::io;
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 pub trait BoolUtil {
@@ -28,6 +29,23 @@ impl CheckedFrom<usize> for u32 {
             panic!("overflow on conversion from usize {} to u32", v);
         } else {
             v as u32
+        }
+    }
+}
+
+impl CheckedFrom<i64> for usize {
+    fn checked_from(v: i64) -> usize {
+        if ! (::std::usize::MIN as i64 <= v) {
+            panic!("underflow on conversion from i64 {} to usize", v);
+        } else if ! {
+            match size_of::<usize>() < size_of::<i64>() {
+                true => v <= ::std::usize::MAX as i64,
+                false => true
+            }
+        } {
+            panic!("overflow on conversion from i64 {} to usize", v);
+        } else {
+            v as usize
         }
     }
 }

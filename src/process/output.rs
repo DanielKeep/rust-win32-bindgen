@@ -211,6 +211,7 @@ impl<'a> OutputFiles<'a> {
     pub fn emit_to_header(&mut self, name: &str, feat: &Features, decl: &str, annot: &str) {
         use std::io::prelude::*;
         let (file, _) = self.get_file(name, &self.out_config.header_path);
+        let decl = decl.replace("${feat}", &feat.to_string());
         if !decl.starts_with("//") {
             writeln!(file, "{}{} /* {} */", feat, decl, annot).unwrap();
         } else {

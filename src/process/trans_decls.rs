@@ -249,25 +249,163 @@ fn process_union_decl<Defer>(
     feat: Features,
     renames: &Renames,
     name_map: &mut NameMap,
-    _native_cc: NativeCallConv,
-    _defer: &mut Defer,
+    native_cc: NativeCallConv,
+    defer: &mut Defer,
 ) -> Result<(), String>
 where Defer: FnMut(Cursor)
 {
+    use std::cmp::max;
+    use clang::CursorKind as CK;
+
     debug!("process_union_decl({}, ..)", decl_cur);
 
     let (name, header) = try!(name_for_maybe_anon(&decl_cur, renames));
     let annot = decl_cur.location().display_short().to_string();
 
-    if EMIT_STUBS {
-        let decl = format!(
-            "#[repr(C)] pub /*union*/ struct {name}; /* STUB! */",
-            name = escape_ident(name.clone()),
-        );
+    let emit_stub = {
+        let name = name.clone();
+        let header = header.clone();
+        let annot = annot.clone();
+        let decl_cur = decl_cur.clone();
+        let feat = feat.clone();
+        move |name_map: &mut NameMap, output: &mut OutputItems| -> Result<_, String> {
+            if EMIT_STUBS {
+                // TODO: just stub for now.
+                let decl = format!("#[repr(C)] pub /*union*/ struct {}; /* ERR STUB! */", escape_ident(name.clone()));
+                try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
+                output.add_header_item(name.clone(), header.clone(), feat, decl, annot.clone());
+            }
+            Ok(())
+        }
+    };
 
-        try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
-        output.add_header_item(name, header, feat, decl, annot);
+    match (decl_cur.is_definition(), decl_cur.definition().is_none()) {
+        (false, false) => {
+            debug!(".. skipping forward declaration");
+            return Ok(());
+        },
+        (false, true) => {
+            // There *is no* definition!
+            debug!(".. no definition found");
+            let decl = format!("#[repr(C)] pub /*union*/ struct {};", escape_ident(name.clone()));
+            try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
+            output.add_header_item(name, header, feat, decl, annot);
+            return Ok(())
+        },
+        (true, _) => ()
     }
+
+    let mut fields: Vec<(String, String)> = vec![];
+
+    // Cheaty cheater, I am!
+    let mut payload_size: usize = 1;
+    let mut payload_align: usize = 1;
+
+    for child_cur in decl_cur.children() {
+        match child_cur.kind() {
+            CK::StructDecl
+            | CK::UnionDecl
+            => {
+                // Defer.
+                defer(child_cur);
+            },
+
+            CK::FieldDecl => {
+                let mut field_name = child_cur.spelling();
+
+                // What if the field doesn't have a name?
+                if field_name == "" {
+                    field_name = format!("_field{}", fields.len());
+                }
+
+                let ty = match trans_type(child_cur.type_(), renames, native_cc) {
+                    Ok(ty) => ty,
+                    Err(err) => {
+                        try!(emit_stub(name_map, output));
+                        return Err(err);
+                    }
+                };
+
+                fields.push((field_name, ty));
+
+                // Update alignment and size.
+                let field_ty = child_cur.type_();
+                let size = field_ty.size_of();
+                let align = field_ty.align_of();
+
+                payload_size = max(payload_size, size);
+                payload_align = max(payload_align, align);
+            },
+
+            CK::UnexposedAttr => {
+                // Skip.
+            },
+
+            other => panic!("nyi {:?}", other)
+        }
+    }
+
+    // Work out the payload fields.
+    let mut payload_fields = vec![];
+
+    {
+        let (f, fs) = match (payload_align, payload_size) {
+            (8, s) if s >= 8 => ("u64", 8),
+            (8, 4...7) => ("u32", 4),
+            (8, 2...3) => ("u16", 2),
+            (8, 1) => ("u8", 1),
+
+            (4, s) if s >= 4 => ("u32", 4),
+            (4, 2...3) => ("u16", 2),
+            (4, 1) => ("u8", 1),
+
+            (2, s) if s >= 2 => ("u16", 2),
+            (2, 1) => ("u8", 1),
+
+            (1, _) => ("u8", 1),
+
+            (a, s) => {
+                try!(emit_stub(name_map, output));
+                return Err(format!("unsupported union payload alignment and size: {:?}, {:?}", a, s));
+            }
+        };
+
+        payload_fields.push(f);
+        payload_size -= fs;
+
+        while payload_size != 0 {
+            let (f, fs) = match payload_size {
+                s if s >= 8 => ("u64", 8),
+                s if s >= 4 => ("u32", 4),
+                s if s >= 2 => ("u16", 2),
+                _ => ("u8", 1)
+            };
+            payload_fields.push(f);
+            payload_size -= fs;
+        }
+    }
+
+    let decl = format!(
+        "#[repr(C)] pub /*union*/ struct {name} {{ {payloads} }} \
+            {fields}",
+        name = escape_ident(name.clone()),
+        payloads = payload_fields.into_iter().enumerate()
+            .map(|(i, s)| format!("_payload{}: {}", i, s))
+            .collect::<Vec<_>>()
+            .join(", "),
+        fields = fields.into_iter()
+            .map(|(n, t)| format!(
+                "${{feat}}union_field! {{ {name}.{{{n}, {n}_mut}}: {t} }}",
+                name = name,
+                n = n,
+                t = t,
+            ))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+
+    try!(add_to_name_map_checked(name_map, name.clone(), decl_cur.clone()));
+    output.add_header_item(name, header, feat, decl, annot);
     Ok(())
 }
 

@@ -864,6 +864,12 @@ impl Type {
         Type(tu, type_)
     }
 
+    pub fn align_of(&self) -> usize {
+        unsafe {
+            ll::clang_Type_getAlignOf(self.1).checked_into()
+        }
+    }
+
     pub fn args(&self) -> Vec<Type> {
         unsafe {
             let len = ll::clang_getNumArgTypes(self.1);
@@ -924,6 +930,12 @@ impl Type {
     pub fn pointee(&self) -> Type {
         unsafe {
             Type::from_ll(self.0.clone(), ll::clang_getPointeeType(self.1))
+        }
+    }
+
+    pub fn size_of(&self) -> usize {
+        unsafe {
+            ll::clang_Type_getSizeOf(self.1).checked_into()
         }
     }
 
