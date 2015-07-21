@@ -107,7 +107,7 @@ pub fn process_macro_defn(
     }
 
     if EMIT_STUBS {
-        let decl = format!("// #define {}{} {:?}", name, args.connect(""), exp_ast);
+        let decl = format!("// #define {}{} {:?}", name, args.join(""), exp_ast);
         output.add_header_item(name, header, feat, decl, annot);
     }
 

@@ -36,7 +36,7 @@ pub fn sanity_check_features(cache: &mut Cache) {
 
         if suspect.len() != 0 {
             warn!("suspect feature set: {}:{}: {} {:?}",
-                path, line, suspect.connect(", "), feat);
+                path, line, suspect.join(", "), feat);
         }
     });
 

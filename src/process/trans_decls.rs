@@ -231,7 +231,7 @@ where Defer: FnMut(Cursor)
         _ => format!(
             "#[repr(C)] pub struct {name} {{ {fields} }}",
             name = escape_ident(name.clone()),
-            fields = fields.connect(", "),
+            fields = fields.join(", "),
         )
     };
 
@@ -343,9 +343,9 @@ where Defer: FnMut(Cursor)
         "{repr} pub enum {name} {{{vars}}} pub use self::{name}::{{{var_names}}};{dup_vars}",
         repr = base_ty.map(|t| format!("#[repr({})]", t)).unwrap_or_else(|| "#[repr(C)]".into()),
         name = escape_ident(name.clone()),
-        vars = vars.connect(", "),
-        var_names = var_names.connect(", "),
-        dup_vars = dup_vars.connect(""),
+        vars = vars.join(", "),
+        var_names = var_names.join(", "),
+        dup_vars = dup_vars.join(""),
     );
 
     try!(add_to_name_map_checked(name_map, name.clone(), decl_cur));
@@ -400,7 +400,7 @@ fn process_function_decl(
             Ok(format!("_: {}", try!(trans_type(ty, renames, native_cc))))
         })
         .collect());
-    let arg_tys = arg_tys.connect(", ");
+    let arg_tys = arg_tys.join(", ");
 
     let decl = format!(
         r#"pub fn {name}({arg_tys}){res_ty};"#,
@@ -624,7 +624,7 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
             };
 
             let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
-            let arg_tys = arg_tys.connect(", ");
+            let arg_tys = arg_tys.join(", ");
 
             let rty = format!(
                 r#"extern {cconv:?} fn({arg_tys}){res_ty}"#,
