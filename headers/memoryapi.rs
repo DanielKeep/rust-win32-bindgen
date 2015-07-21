@@ -1,8 +1,8 @@
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05010000"))] #[repr(C)] pub enum MEMORY_RESOURCE_NOTIFICATION_TYPE {LowMemoryResourceNotification = 0, HighMemoryResourceNotification = 1} pub use self::MEMORY_RESOURCE_NOTIFICATION_TYPE::{LowMemoryResourceNotification, HighMemoryResourceNotification}; /* memoryapi.h:411:14, memoryapi.h:411:14, memoryapi.h:411:14 */
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] #[repr(C)] pub struct WIN32_MEMORY_RANGE_ENTRY { VirtualAddress: ::winnt::PVOID, NumberOfBytes: ::basetsd::SIZE_T } /* memoryapi.h:496:16, memoryapi.h:496:16, memoryapi.h:496:16 */
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] pub type PWIN32_MEMORY_RANGE_ENTRY = *mut ::memoryapi::WIN32_MEMORY_RANGE_ENTRY; /* memoryapi.h:499:30, memoryapi.h:499:30, memoryapi.h:499:30 */
-#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] pub type BAD_MEMORY_CALLBACK_ROUTINE = extern "system" fn(); /* memoryapi.h:662:1, memoryapi.h:662:1, memoryapi.h:662:1 */
-#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] pub type PBAD_MEMORY_CALLBACK_ROUTINE = extern "system" fn(); /* memoryapi.h:666:38, memoryapi.h:666:38, memoryapi.h:666:38 */
+#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] pub type BAD_MEMORY_CALLBACK_ROUTINE = Option<extern "system" fn()>; /* memoryapi.h:662:1, memoryapi.h:662:1, memoryapi.h:662:1 */
+#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_06020000"))] pub type PBAD_MEMORY_CALLBACK_ROUTINE = Option<extern "system" fn()>; /* memoryapi.h:666:38, memoryapi.h:666:38, memoryapi.h:666:38 */
 #[cfg(feature="winapi_app")] #[doc(inline)] pub use ::winnt::SECTION_MAP_WRITE as FILE_MAP_WRITE; /* memoryapi.h:51:9, memoryapi.h:51:9, memoryapi.h:51:9 */
 #[cfg(feature="winapi_app")] #[doc(inline)] pub use ::winnt::SECTION_MAP_READ as FILE_MAP_READ; /* memoryapi.h:52:9, memoryapi.h:52:9, memoryapi.h:52:9 */
 #[cfg(feature="winapi_desktop")] #[doc(inline)] pub use ::winnt::SECTION_MAP_EXECUTE_EXPLICIT as FILE_MAP_EXECUTE; /* memoryapi.h:62:9, memoryapi.h:62:9, memoryapi.h:62:9 */

@@ -3,10 +3,10 @@
 #[cfg(feature="winapi_app")] pub type INIT_ONCE = ::winnt::RTL_RUN_ONCE; /* synchapi.h:283:22, synchapi.h:283:22, synchapi.h:283:22 */
 #[cfg(feature="winapi_app")] pub type PINIT_ONCE = ::winnt::PRTL_RUN_ONCE; /* synchapi.h:284:23, synchapi.h:284:23, synchapi.h:284:23 */
 #[cfg(feature="winapi_app")] pub type LPINIT_ONCE = ::winnt::PRTL_RUN_ONCE; /* synchapi.h:285:23, synchapi.h:285:23, synchapi.h:285:23 */
-#[cfg(feature="winapi_app")] pub type PINIT_ONCE_FN = extern "system" fn(*mut ::winnt::RTL_RUN_ONCE, *mut ::libc::c_void, *mut *mut ::libc::c_void) -> ::libc::c_int; /* synchapi.h:306:10, synchapi.h:306:10, synchapi.h:306:10 */
+#[cfg(feature="winapi_app")] pub type PINIT_ONCE_FN = Option<extern "system" fn(*mut ::winnt::RTL_RUN_ONCE, *mut ::libc::c_void, *mut *mut ::libc::c_void) -> ::libc::c_int>; /* synchapi.h:306:10, synchapi.h:306:10, synchapi.h:306:10 */
 #[cfg(feature="winapi_app")] pub type CONDITION_VARIABLE = ::winnt::RTL_CONDITION_VARIABLE; /* synchapi.h:361:32, synchapi.h:361:32, synchapi.h:361:32 */
 #[cfg(feature="winapi_app")] pub type PCONDITION_VARIABLE = *mut ::winnt::RTL_CONDITION_VARIABLE; /* synchapi.h:361:53, synchapi.h:361:53, synchapi.h:361:53 */
-#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_04000000"))] pub type PTIMERAPCROUTINE = extern "system" fn(*mut ::libc::c_void, ::libc::c_ulong, ::libc::c_ulong); /* synchapi.h:674:12, synchapi.h:674:12, synchapi.h:674:12 */
+#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_04000000"))] pub type PTIMERAPCROUTINE = Option<extern "system" fn(*mut ::libc::c_void, ::libc::c_ulong, ::libc::c_ulong)>; /* synchapi.h:674:12, synchapi.h:674:12, synchapi.h:674:12 */
 #[cfg(feature="winapi_desktop")] pub type SYNCHRONIZATION_BARRIER = ::winnt::RTL_BARRIER; /* synchapi.h:866:21, synchapi.h:866:21, synchapi.h:866:21 */
 #[cfg(feature="winapi_desktop")] pub type PSYNCHRONIZATION_BARRIER = ::winnt::PRTL_BARRIER; /* synchapi.h:867:22, synchapi.h:867:22, synchapi.h:867:22 */
 #[cfg(feature="winapi_desktop")] pub type LPSYNCHRONIZATION_BARRIER = ::winnt::PRTL_BARRIER; /* synchapi.h:868:22, synchapi.h:868:22, synchapi.h:868:22 */

@@ -60,9 +60,9 @@
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] pub type PIMECHARPOSITION = *mut ::imm::IMECHARPOSITION; /* imm.h:213:21, imm.h:213:21, imm.h:213:21 */
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] pub type NPIMECHARPOSITION = *mut ::imm::IMECHARPOSITION; /* imm.h:213:45, imm.h:213:45, imm.h:213:45 */
 #[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] pub type LPIMECHARPOSITION = *mut ::imm::IMECHARPOSITION; /* imm.h:213:69, imm.h:213:69, imm.h:213:69 */
-#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type IMCENUMPROC = extern "system" fn(*mut ::imm::HIMC__, ::libc::c_long) -> ::libc::c_int; /* imm.h:215:28, imm.h:215:28 */
-#[cfg(feature="winapi_desktop")] pub type REGISTERWORDENUMPROCA = extern "system" fn(*const ::libc::c_schar, ::libc::c_ulong, *const ::libc::c_schar, *mut ::libc::c_void) -> ::libc::c_int; /* imm.h:377:24, imm.h:377:24, imm.h:377:24 */
-#[cfg(feature="winapi_desktop")] pub type REGISTERWORDENUMPROCW = extern "system" fn(*const ::libc::c_ushort, ::libc::c_ulong, *const ::libc::c_ushort, *mut ::libc::c_void) -> ::libc::c_int; /* imm.h:378:24, imm.h:378:24, imm.h:378:24 */
+#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type IMCENUMPROC = Option<extern "system" fn(*mut ::imm::HIMC__, ::libc::c_long) -> ::libc::c_int>; /* imm.h:215:28, imm.h:215:28 */
+#[cfg(feature="winapi_desktop")] pub type REGISTERWORDENUMPROCA = Option<extern "system" fn(*const ::libc::c_schar, ::libc::c_ulong, *const ::libc::c_schar, *mut ::libc::c_void) -> ::libc::c_int>; /* imm.h:377:24, imm.h:377:24, imm.h:377:24 */
+#[cfg(feature="winapi_desktop")] pub type REGISTERWORDENUMPROCW = Option<extern "system" fn(*const ::libc::c_ushort, ::libc::c_ulong, *const ::libc::c_ushort, *mut ::libc::c_void) -> ::libc::c_int>; /* imm.h:378:24, imm.h:378:24, imm.h:378:24 */
 pub const STYLE_DESCRIPTION_SIZE: i32 = 0x20i32; /* Integer(32, Yes, Unknown) */ /* imm.h:131:9, imm.h:131:9, imm.h:131:9 */
 #[cfg(any(feature="winapi_ver_05000000"))] pub const IMEMENUITEM_STRING_SIZE: i32 = 0x50i32; /* Integer(80, Yes, Unknown) */ /* imm.h:168:9, imm.h:168:9, imm.h:168:9 */
 #[cfg(feature="winapi_desktop")] #[doc(inline)] pub use ::imm::REGISTERWORDENUMPROCW as REGISTERWORDENUMPROC; /* imm.h:380:9, imm.h:380:9, imm.h:380:9 */
@@ -282,4 +282,4 @@ pub const IME_REGWORD_STYLE_USER_LAST: i32 = 0xffffffffi32; /* Integer(429496729
 #[cfg(any(feature="winapi_ver_05000000"))] #[doc(inline)] pub use ::winuser::MFS_DEFAULT as IMFS_DEFAULT; /* imm.h:762:9, imm.h:762:9, imm.h:762:9 */
 pub const SOFTKEYBOARD_TYPE_T1: i32 = 0x1i32; /* Integer(1, Yes, Unknown) */ /* imm.h:768:9, imm.h:768:9, imm.h:768:9 */
 pub const SOFTKEYBOARD_TYPE_C1: i32 = 0x2i32; /* Integer(2, Yes, Unknown) */ /* imm.h:770:9, imm.h:770:9, imm.h:770:9 */
-#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] #[cfg(any(target_arch="x86_64"))] pub type IMCENUMPROC = extern "system" fn(*mut ::imm::HIMC__, ::libc::c_longlong) -> ::libc::c_int; /* imm.h:215:28 */
+#[cfg(feature="winapi_desktop")] #[cfg(any(feature="winapi_ver_05000000"))] #[cfg(any(target_arch="x86_64"))] pub type IMCENUMPROC = Option<extern "system" fn(*mut ::imm::HIMC__, ::libc::c_longlong) -> ::libc::c_int>; /* imm.h:215:28 */

@@ -35,9 +35,9 @@
 #[cfg(feature="winapi_app")] pub type HLOCAL = ::winnt::HANDLE; /* minwindef.h:212:29, minwindef.h:212:29, minwindef.h:212:29 */
 #[cfg(feature="winapi_app")] pub type GLOBALHANDLE = ::winnt::HANDLE; /* minwindef.h:213:29, minwindef.h:213:29, minwindef.h:213:29 */
 #[cfg(feature="winapi_app")] pub type LOCALHANDLE = ::winnt::HANDLE; /* minwindef.h:214:29, minwindef.h:214:29, minwindef.h:214:29 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type FARPROC = extern "system" fn() -> ::libc::c_int; /* minwindef.h:222:26, minwindef.h:222:26 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type NEARPROC = extern "system" fn() -> ::libc::c_int; /* minwindef.h:223:27, minwindef.h:223:27 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type PROC = extern "system" fn() -> ::libc::c_int; /* minwindef.h:224:22, minwindef.h:224:22 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type FARPROC = Option<extern "system" fn() -> ::libc::c_int>; /* minwindef.h:222:26, minwindef.h:222:26 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type NEARPROC = Option<extern "system" fn() -> ::libc::c_int>; /* minwindef.h:223:27, minwindef.h:223:27 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86", target_arch="arm"))] pub type PROC = Option<extern "system" fn() -> ::libc::c_int>; /* minwindef.h:224:22, minwindef.h:224:22 */
 #[cfg(feature="winapi_app")] pub type ATOM = ::minwindef::WORD; /* minwindef.h:237:29, minwindef.h:237:29, minwindef.h:237:29 */
 #[cfg(feature="winapi_app")] #[repr(C)] pub struct HKEY__ { unused: ::libc::c_int } /* minwindef.h:239:1, minwindef.h:239:1, minwindef.h:239:1 */
 #[cfg(feature="winapi_app")] pub type HKEY = *mut ::minwindef::HKEY__; /* minwindef.h:239:1, minwindef.h:239:1, minwindef.h:239:1 */
@@ -71,6 +71,6 @@
 #[cfg(feature="winapi_app")] pub const MAX_PATH: i32 = 0x104i32; /* Integer(260, Yes, Unknown) */ /* minwindef.h:60:9, minwindef.h:60:9, minwindef.h:60:9 */
 #[cfg(feature="winapi_app")] pub const FALSE: i32 = 0x0i32; /* Integer(0, Yes, Unknown) */ /* minwindef.h:71:9, minwindef.h:71:9, minwindef.h:71:9 */
 #[cfg(feature="winapi_app")] pub const TRUE: i32 = 0x1i32; /* Integer(1, Yes, Unknown) */ /* minwindef.h:75:9, minwindef.h:75:9, minwindef.h:75:9 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type FARPROC = extern "system" fn() -> ::libc::c_longlong; /* minwindef.h:218:30 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type NEARPROC = extern "system" fn() -> ::libc::c_longlong; /* minwindef.h:219:31 */
-#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type PROC = extern "system" fn() -> ::libc::c_longlong; /* minwindef.h:220:26 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type FARPROC = Option<extern "system" fn() -> ::libc::c_longlong>; /* minwindef.h:218:30 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type NEARPROC = Option<extern "system" fn() -> ::libc::c_longlong>; /* minwindef.h:219:31 */
+#[cfg(feature="winapi_app")] #[cfg(any(target_arch="x86_64"))] pub type PROC = Option<extern "system" fn() -> ::libc::c_longlong>; /* minwindef.h:220:26 */

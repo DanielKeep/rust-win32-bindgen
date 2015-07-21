@@ -5,6 +5,24 @@
 #![allow(overflowing_literals)]
 extern crate libc;
 
+macro_rules! union_field {
+    ($base:ident.{$get:ident, $get_mut:ident}: $t:ty) => {
+        impl $base {
+            pub fn $get(&self) -> &$t {
+                unsafe {
+                    ::std::mem::transmute(self)
+                }
+            }
+
+            pub fn $get_mut(&mut self) -> &mut $t {
+                unsafe {
+                    ::std::mem::transmute(self)
+                }
+            }
+        }
+    };
+}
+
 pub use self::apiset::*;
 pub use self::basetsd::*;
 pub use self::bemapiset::*;
@@ -84,6 +102,48 @@ pub use self::wnnc::*;
 #[path="headers/winsvc.rs"] pub mod winsvc;
 #[path="headers/winuser.rs"] pub mod winuser;
 #[path="headers/wnnc.rs"] pub mod wnnc;
+
+#[doc(hidden)] pub mod _modules {
+    pub use super::apiset;
+    pub use super::basetsd;
+    pub use super::bemapiset;
+    pub use super::errhandlingapi;
+    pub use super::fileapi;
+    pub use super::guiddef;
+    pub use super::heapapi;
+    pub use super::ime_cmodes;
+    pub use super::imm;
+    pub use super::kernelspecs;
+    pub use super::ktmtypes;
+    pub use super::libloaderapi;
+    pub use super::mcx;
+    pub use super::memoryapi;
+    pub use super::minwinbase;
+    pub use super::minwindef;
+    pub use super::namespaceapi;
+    pub use super::processthreadsapi;
+    pub use super::reason;
+    pub use super::stralign;
+    pub use super::synchapi;
+    pub use super::sysinfoapi;
+    pub use super::threadpoolapiset;
+    pub use super::timezoneapi;
+    pub use super::tvout;
+    pub use super::verrsrc;
+    pub use super::winapifamily;
+    pub use super::winbase;
+    pub use super::wincon;
+    pub use super::windef;
+    pub use super::winerror;
+    pub use super::wingdi;
+    pub use super::winnetwk;
+    pub use super::winnls;
+    pub use super::winnt;
+    pub use super::winreg;
+    pub use super::winsvc;
+    pub use super::winuser;
+    pub use super::wnnc;
+}
 
 #[path="libraries/adsiid.rs"] #[link(name="adsiid")] pub mod adsiid;
 #[path="libraries/advapi32.rs"] #[link(name="advapi32")] pub mod advapi32;

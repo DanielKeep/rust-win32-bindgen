@@ -1,6 +1,7 @@
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_TRIGGER_CUSTOM_STATE_ID { Data: *mut [::minwindef::DWORD; 2] } /* winsvc.h:456:9, winsvc.h:456:9, winsvc.h:456:9 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM { u: ::winsvc::SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0 } /* winsvc.h:461:16, winsvc.h:461:16, winsvc.h:461:16 */
-#[cfg(feature="winapi_desktop")] #[repr(C)] pub /*union*/ struct SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0; /* STUB! */ /* winsvc.h:462:5, winsvc.h:462:5, winsvc.h:462:5 */
+#[cfg(feature="winapi_desktop")] #[repr(C)] pub /*union*/ struct SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0 { _payload0: u32, _payload1: u32 } #[cfg(feature="winapi_desktop")] union_field! { SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0.{CustomStateId, CustomStateId_mut}: ::winsvc::SERVICE_TRIGGER_CUSTOM_STATE_ID } #[cfg(feature="winapi_desktop")] union_field! { SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0.{s, s_mut}: ::winsvc::SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0_Child_1 } /* winsvc.h:462:5, winsvc.h:462:5, winsvc.h:462:5 */
+#[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM_Child_0_Child_1 { DataOffset: ::minwindef::DWORD, Data: *mut [::minwindef::BYTE; 1] } /* winsvc.h:464:9, winsvc.h:464:9, winsvc.h:464:9 */
 #[cfg(feature="winapi_desktop")] pub type LPSERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM = *mut ::winsvc::SERVICE_CUSTOM_SYSTEM_STATE_CHANGE_DATA_ITEM; /* winsvc.h:469:50, winsvc.h:469:50, winsvc.h:469:50 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_DESCRIPTIONA { lpDescription: ::winnt::LPSTR } /* winsvc.h:486:16, winsvc.h:486:16, winsvc.h:486:16 */
 #[cfg(feature="winapi_desktop")] pub type LPSERVICE_DESCRIPTIONA = *mut ::winsvc::SERVICE_DESCRIPTIONA; /* winsvc.h:488:26, winsvc.h:488:26, winsvc.h:488:26 */
@@ -79,21 +80,21 @@
 #[cfg(feature="winapi_desktop")] pub type LPQUERY_SERVICE_CONFIGW = *mut ::winsvc::QUERY_SERVICE_CONFIGW; /* winsvc.h:817:27, winsvc.h:817:27, winsvc.h:817:27 */
 #[cfg(feature="winapi_desktop")] pub type QUERY_SERVICE_CONFIG = ::winsvc::QUERY_SERVICE_CONFIGW; /* winsvc.h:819:31, winsvc.h:819:31, winsvc.h:819:31 */
 #[cfg(feature="winapi_desktop")] pub type LPQUERY_SERVICE_CONFIG = ::winsvc::LPQUERY_SERVICE_CONFIGW; /* winsvc.h:820:33, winsvc.h:820:33, winsvc.h:820:33 */
-#[cfg(feature="winapi_desktop")] pub type SERVICE_MAIN_FUNCTIONW = extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort); /* winsvc.h:832:21, winsvc.h:832:21, winsvc.h:832:21 */
-#[cfg(feature="winapi_desktop")] pub type SERVICE_MAIN_FUNCTIONA = extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort); /* winsvc.h:837:21, winsvc.h:837:21, winsvc.h:837:21 */
-#[cfg(feature="winapi_desktop")] pub type LPSERVICE_MAIN_FUNCTIONW = extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort); /* winsvc.h:848:23, winsvc.h:848:23, winsvc.h:848:23 */
-#[cfg(feature="winapi_desktop")] pub type LPSERVICE_MAIN_FUNCTIONA = extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_schar); /* winsvc.h:853:23, winsvc.h:853:23, winsvc.h:853:23 */
+#[cfg(feature="winapi_desktop")] pub type SERVICE_MAIN_FUNCTIONW = Option<extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort)>; /* winsvc.h:832:21, winsvc.h:832:21, winsvc.h:832:21 */
+#[cfg(feature="winapi_desktop")] pub type SERVICE_MAIN_FUNCTIONA = Option<extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort)>; /* winsvc.h:837:21, winsvc.h:837:21, winsvc.h:837:21 */
+#[cfg(feature="winapi_desktop")] pub type LPSERVICE_MAIN_FUNCTIONW = Option<extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_ushort)>; /* winsvc.h:848:23, winsvc.h:848:23, winsvc.h:848:23 */
+#[cfg(feature="winapi_desktop")] pub type LPSERVICE_MAIN_FUNCTIONA = Option<extern "system" fn(::libc::c_ulong, *mut *mut ::libc::c_schar)>; /* winsvc.h:853:23, winsvc.h:853:23, winsvc.h:853:23 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_TABLE_ENTRYA { lpServiceName: ::winnt::LPSTR, lpServiceProc: ::winsvc::LPSERVICE_MAIN_FUNCTIONA } /* winsvc.h:869:16, winsvc.h:869:16, winsvc.h:869:16 */
 #[cfg(feature="winapi_desktop")] pub type LPSERVICE_TABLE_ENTRYA = *mut ::winsvc::SERVICE_TABLE_ENTRYA; /* winsvc.h:872:25, winsvc.h:872:25, winsvc.h:872:25 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_TABLE_ENTRYW { lpServiceName: ::winnt::LPWSTR, lpServiceProc: ::winsvc::LPSERVICE_MAIN_FUNCTIONW } /* winsvc.h:873:16, winsvc.h:873:16, winsvc.h:873:16 */
 #[cfg(feature="winapi_desktop")] pub type LPSERVICE_TABLE_ENTRYW = *mut ::winsvc::SERVICE_TABLE_ENTRYW; /* winsvc.h:876:25, winsvc.h:876:25, winsvc.h:876:25 */
 #[cfg(feature="winapi_desktop")] pub type SERVICE_TABLE_ENTRY = ::winsvc::SERVICE_TABLE_ENTRYW; /* winsvc.h:878:30, winsvc.h:878:30, winsvc.h:878:30 */
 #[cfg(feature="winapi_desktop")] pub type LPSERVICE_TABLE_ENTRY = ::winsvc::LPSERVICE_TABLE_ENTRYW; /* winsvc.h:879:32, winsvc.h:879:32, winsvc.h:879:32 */
-#[cfg(feature="winapi_desktop")] pub type HANDLER_FUNCTION = extern "system" fn(::libc::c_ulong); /* winsvc.h:889:21, winsvc.h:889:21, winsvc.h:889:21 */
-#[cfg(feature="winapi_desktop")] pub type HANDLER_FUNCTION_EX = extern "system" fn(::libc::c_ulong, ::libc::c_ulong, *mut ::libc::c_void, *mut ::libc::c_void) -> ::libc::c_ulong; /* winsvc.h:893:22, winsvc.h:893:22, winsvc.h:893:22 */
-#[cfg(feature="winapi_desktop")] pub type LPHANDLER_FUNCTION = extern "system" fn(::libc::c_ulong); /* winsvc.h:900:23, winsvc.h:900:23, winsvc.h:900:23 */
-#[cfg(feature="winapi_desktop")] pub type LPHANDLER_FUNCTION_EX = extern "system" fn(::libc::c_ulong, ::libc::c_ulong, *mut ::libc::c_void, *mut ::libc::c_void) -> ::libc::c_ulong; /* winsvc.h:904:24, winsvc.h:904:24, winsvc.h:904:24 */
-#[cfg(feature="winapi_desktop")] pub type PFN_SC_NOTIFY_CALLBACK = extern "system" fn(*mut ::libc::c_void); /* winsvc.h:916:14, winsvc.h:916:14, winsvc.h:916:14 */
+#[cfg(feature="winapi_desktop")] pub type HANDLER_FUNCTION = Option<extern "system" fn(::libc::c_ulong)>; /* winsvc.h:889:21, winsvc.h:889:21, winsvc.h:889:21 */
+#[cfg(feature="winapi_desktop")] pub type HANDLER_FUNCTION_EX = Option<extern "system" fn(::libc::c_ulong, ::libc::c_ulong, *mut ::libc::c_void, *mut ::libc::c_void) -> ::libc::c_ulong>; /* winsvc.h:893:22, winsvc.h:893:22, winsvc.h:893:22 */
+#[cfg(feature="winapi_desktop")] pub type LPHANDLER_FUNCTION = Option<extern "system" fn(::libc::c_ulong)>; /* winsvc.h:900:23, winsvc.h:900:23, winsvc.h:900:23 */
+#[cfg(feature="winapi_desktop")] pub type LPHANDLER_FUNCTION_EX = Option<extern "system" fn(::libc::c_ulong, ::libc::c_ulong, *mut ::libc::c_void, *mut ::libc::c_void) -> ::libc::c_ulong>; /* winsvc.h:904:24, winsvc.h:904:24, winsvc.h:904:24 */
+#[cfg(feature="winapi_desktop")] pub type PFN_SC_NOTIFY_CALLBACK = Option<extern "system" fn(*mut ::libc::c_void)>; /* winsvc.h:916:14, winsvc.h:916:14, winsvc.h:916:14 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_NOTIFY_1 { dwVersion: ::minwindef::DWORD, pfnNotifyCallback: ::winsvc::PFN_SC_NOTIFY_CALLBACK, pContext: ::winnt::PVOID, dwNotificationStatus: ::minwindef::DWORD, ServiceStatus: ::winsvc::SERVICE_STATUS_PROCESS } /* winsvc.h:923:16, winsvc.h:923:16, winsvc.h:923:16 */
 #[cfg(feature="winapi_desktop")] pub type PSERVICE_NOTIFY_1 = *mut ::winsvc::SERVICE_NOTIFY_1; /* winsvc.h:929:22, winsvc.h:929:22, winsvc.h:929:22 */
 #[cfg(feature="winapi_desktop")] #[repr(C)] pub struct SERVICE_NOTIFY_2A { dwVersion: ::minwindef::DWORD, pfnNotifyCallback: ::winsvc::PFN_SC_NOTIFY_CALLBACK, pContext: ::winnt::PVOID, dwNotificationStatus: ::minwindef::DWORD, ServiceStatus: ::winsvc::SERVICE_STATUS_PROCESS, dwNotificationTriggered: ::minwindef::DWORD, pszServiceNames: ::winnt::LPSTR } /* winsvc.h:931:16, winsvc.h:931:16, winsvc.h:931:16 */
