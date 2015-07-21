@@ -627,7 +627,7 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
             let arg_tys = arg_tys.join(", ");
 
             let rty = format!(
-                r#"extern {cconv:?} fn({arg_tys}){res_ty}"#,
+                r#"Option<extern {cconv:?} fn({arg_tys}){res_ty}>"#,
                 cconv = cconv.as_str(),
                 arg_tys = arg_tys,
                 res_ty = res_ty,
