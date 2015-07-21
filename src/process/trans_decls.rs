@@ -396,7 +396,7 @@ fn process_function_decl(
         format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
     };
 
-    let args: Vec<_> = try!(decl_cur.children().into_iter()
+    let mut args: Vec<_> = try!(decl_cur.children().into_iter()
         .filter(|cur| cur.kind() == CK::ParmDecl)
         .map(|cur| -> Result<_, String> {
             let name = escape_ident(cur.spelling());
@@ -405,6 +405,11 @@ fn process_function_decl(
             Ok(format!("{}: {}", name, ty))
         })
         .collect());
+
+    if args.len() > 0 && ty.is_function_type_variadic() {
+        args.push("...".into());
+    }
+
     let args = args.join(", ");
 
     let decl = format!(
@@ -628,7 +633,10 @@ fn trans_type(ty: clang::Type, renames: &Renames, native_cc: NativeCallConv) -> 
                 format!(" -> {}", try!(trans_type(ty.result(), renames, native_cc)))
             };
 
-            let arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
+            let mut arg_tys: Vec<String> = try!(ty.args().into_iter().map(|ty| trans_type(ty, renames, native_cc)).collect());
+            if arg_tys.len() > 0 && ty.is_function_type_variadic() {
+                arg_tys.push("...".into());
+            }
             let arg_tys = arg_tys.join(", ");
 
             let rty = format!(

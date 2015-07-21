@@ -911,6 +911,12 @@ impl Type {
         }
     }
 
+    pub fn is_function_type_variadic(&self) -> bool {
+        unsafe {
+            ll::clang_isFunctionTypeVariadic(self.1) != 0
+        }
+    }
+
     pub fn kind(&self) -> TypeKind {
         self.1.kind.try_into().expect("valid type kind for type")
     }
@@ -920,8 +926,6 @@ impl Type {
             Type::from_ll(self.0.clone(), ll::clang_getPointeeType(self.1))
         }
     }
-
-    // pub fn clang_isFunctionTypeVariadic(T: CXType) -> ::libc::c_uint;
 
     pub fn result(&self) -> Type {
         unsafe {
